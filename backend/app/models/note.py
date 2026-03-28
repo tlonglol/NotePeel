@@ -9,6 +9,7 @@ class ProcessingStatus(enum.Enum):
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
+    NEEDS_REVIEW = "needs_review"
     FAILED = "failed"
 
 
