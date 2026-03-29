@@ -1,3 +1,5 @@
+import { renderMathInHTML } from './mathRenderer';
+
 type ExtractedNoteLike = {
   status?: string | null;
   raw_text?: string | null;
@@ -33,6 +35,9 @@ export const isExtractionLikelyIncomplete = (note: ExtractedNoteLike) => {
  * readable on dark backgrounds. No-op in light mode.
  */
 export const prepareContentForDisplay = (html: string, darkMode: boolean): string => {
+  // Render any LaTeX math expressions ($...$ and $$...$$)
+  html = renderMathInHTML(html);
+
   if (!darkMode) return html;
   return html
     .replace(/color:\s*#3[Ee]2723/g, 'color: #FF9800')  // header text: dark brown → amber

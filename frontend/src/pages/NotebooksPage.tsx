@@ -37,6 +37,8 @@ export default function NotebooksPage({ userEmail, onLogout, onOpenNotebook, onO
   const [editingNotebook, setEditingNotebook] = useState<Notebook | null>(null);
   const [message, setMessage] = useState('');
   const [hoveredCard, setHoveredCard] = useState<number | null>(null);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Theme colors
   const theme = {
@@ -132,6 +134,34 @@ export default function NotebooksPage({ userEmail, onLogout, onOpenNotebook, onO
       day: 'numeric',
       year: 'numeric'
     });
+  };
+
+  const handleDragStart = (index: number) => {
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    setDragOverIndex(index);
+  };
+
+  const handleDrop = (index: number) => {
+    if (draggedIndex === null || draggedIndex === index) {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+    const reordered = [...notebooks];
+    const [moved] = reordered.splice(draggedIndex, 1);
+    reordered.splice(index, 0, moved);
+    setNotebooks(reordered);
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
   };
 
   const getContrastColor = (hexColor: string) => {
@@ -435,21 +465,29 @@ export default function NotebooksPage({ userEmail, onLogout, onOpenNotebook, onO
               <div
                 key={notebook.id}
                 className="notebook-card"
+                draggable
+                onDragStart={() => handleDragStart(index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDrop={() => handleDrop(index)}
+                onDragEnd={handleDragEnd}
                 style={{
                   background: theme.cardBg,
                   borderRadius: '8px',
                   overflow: 'hidden',
-                  cursor: 'pointer',
+                  cursor: draggedIndex !== null ? 'grabbing' : 'pointer',
                   transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                  boxShadow: hoveredCard === notebook.id 
-                    ? '0 12px 28px rgba(0,0,0,0.15)' 
+                  boxShadow: hoveredCard === notebook.id
+                    ? '0 12px 28px rgba(0,0,0,0.15)'
                     : '0 2px 8px rgba(0,0,0,0.08)',
                   transform: hoveredCard === notebook.id ? 'translateY(-4px)' : 'translateY(0)',
                   animationDelay: `${index * 0.05}s`,
-                  border: `1px solid ${theme.border}`,
-                  aspectRatio: '3 / 4'
+                  border: dragOverIndex === index
+                    ? '2px solid #FFC107'
+                    : `1px solid ${theme.border}`,
+                  aspectRatio: '3 / 4',
+                  opacity: draggedIndex === index ? 0.5 : 1
                 }}
-                onClick={() => onOpenNotebook(notebook.id)}
+                onClick={() => { if (draggedIndex === null) onOpenNotebook(notebook.id); }}
                 onMouseEnter={() => setHoveredCard(notebook.id)}
                 onMouseLeave={() => setHoveredCard(null)}
               >

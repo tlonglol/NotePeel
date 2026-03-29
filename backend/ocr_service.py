@@ -64,6 +64,11 @@ Also include at the top level:
 - "raw_text": full verbatim transcription in reading order
 
 IMPORTANT rules:
+- For any mathematical expressions, equations, formulas, or symbols (summations, integrals, fractions, Greek letters, superscripts, subscripts, etc.), wrap them in LaTeX delimiters:
+  - Use $...$ for inline math (e.g. $\\sum_{i=1}^{n} x_i$, $\\alpha + \\beta$, $f(x) = x^2$)
+  - Use $$...$$ for standalone/display equations on their own line (e.g. $$\\int_0^\\infty e^{-x} dx = 1$$)
+  - Always use proper LaTeX notation: \\frac{a}{b} for fractions, \\sum for summation, \\int for integrals, \\sqrt{x} for square roots, Greek letters like \\alpha \\beta \\sigma \\theta, etc.
+  - Do NOT leave math as plain text. Convert ALL mathematical notation to LaTeX.
 - "container" refers to a border drawn around a TEXT element — not the shape of a diagram
 - If a text section has a rectangle drawn around it, set container to "box" (not type "diagram")
 - If you see a hand-drawn rectangle/box with TEXT inside it, do NOT set type to "diagram".
@@ -82,7 +87,7 @@ PROMPTS = {
     "default": LAYOUT_PROMPT,
     "lecture": LAYOUT_PROMPT + """
 \nExtra instructions for lecture notes:
-- Transcribe equations exactly as written
+- Transcribe ALL equations and formulas using LaTeX notation wrapped in $...$ (inline) or $$...$$ (display). Never leave math as plain text.
 - Labeled diagrams should capture every label in diagram.labels
 - Defined terms should be type "key_value"
 """,
@@ -104,6 +109,7 @@ Rules:
 - Preserve headings, bullets, and line breaks when possible
 - If a word is unclear, make your best guess instead of omitting nearby readable text
 - Focus on transcription completeness over layout analysis
+- For any mathematical expressions, equations, or formulas, use LaTeX notation: $...$ for inline math, $$...$$ for display equations
 """,
     "lecture": """
 Transcribe every visible word from this lecture note in natural reading order.
@@ -114,6 +120,7 @@ Rules:
 - Preserve headings, bullets, equations, and line breaks when possible
 - If a word is unclear, make your best guess instead of omitting nearby readable text
 - Focus on transcription completeness over layout analysis
+- Transcribe ALL equations and formulas using LaTeX notation: $...$ for inline math, $$...$$ for display equations. Never leave math as plain text.
 """,
     "meeting": """
 Transcribe every visible word from this meeting note in natural reading order.

@@ -32,6 +32,11 @@ export default function Dashboard({ userEmail, onLogout, onOpenSettings, initial
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showImage, setShowImage] = useState(false);
+  const [imageRotation, setImageRotation] = useState(0);
+  const [imagePos, setImagePos] = useState({ x: 100, y: 50 });
+  const [imageSize, setImageSize] = useState(400);
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [showNotesPanel, setShowNotesPanel] = useState(false);
   const [fontSize, setFontSize] = useState('4');
@@ -1624,13 +1629,20 @@ export default function Dashboard({ userEmail, onLogout, onOpenSettings, initial
         {/* Zoom Controls */}
         <select value={zoom} onChange={(e) => setZoom(Number(e.target.value))} style={{ padding: '6px 8px', border: `1px solid ${theme.border}`, borderRadius: '4px', fontSize: '12px', background: theme.menuBg, color: theme.text, width: '70px' }} title="Zoom">
           <option value={50}>50%</option>
+          <option value={60}>60%</option>
+          <option value={70}>70%</option>
           <option value={75}>75%</option>
+          <option value={80}>80%</option>
+          <option value={85}>85%</option>
+          <option value={90}>90%</option>
+          <option value={95}>95%</option>
           <option value={100}>100%</option>
+          <option value={110}>110%</option>
           <option value={125}>125%</option>
           <option value={150}>150%</option>
         </select>
-        <button style={{...toolbarBtnStyle, background: theme.menuBg, color: theme.text, border: `1px solid ${theme.border}`}} onClick={() => setZoom(Math.max(50, zoom - 25))} title="Zoom Out">−</button>
-        <button style={{...toolbarBtnStyle, background: theme.menuBg, color: theme.text, border: `1px solid ${theme.border}`}} onClick={() => setZoom(Math.min(150, zoom + 25))} title="Zoom In">+</button>
+        <button style={{...toolbarBtnStyle, background: theme.menuBg, color: theme.text, border: `1px solid ${theme.border}`}} onClick={() => setZoom(Math.max(50, zoom - 5))} title="Zoom Out">−</button>
+        <button style={{...toolbarBtnStyle, background: theme.menuBg, color: theme.text, border: `1px solid ${theme.border}`}} onClick={() => setZoom(Math.min(150, zoom + 5))} title="Zoom In">+</button>
 
         <div style={{ flex: 1 }} />
 
@@ -1924,20 +1936,50 @@ export default function Dashboard({ userEmail, onLogout, onOpenSettings, initial
           </div>
         )}
 
-        {/* Image Panel (toggleable) */}
+        {/* Floating Image Viewer */}
         {showImage && selectedNote && (
-          <div style={{ width: '350px', background: darkMode ? '#292524' : '#f5f5f5', borderRight: `1px solid ${theme.border}`, padding: '20px', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <h3 style={{ margin: 0, fontSize: '14px', color: theme.text }}>📷 Original Image</h3>
-              <button onClick={() => setShowImage(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', color: theme.text }}>✕</button>
+          <div
+            style={{
+              position: 'fixed', left: imagePos.x, top: imagePos.y, width: imageSize,
+              background: darkMode ? '#292524' : '#fff', borderRadius: '12px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)', zIndex: 1000,
+              border: `1px solid ${theme.border}`, overflow: 'hidden',
+              resize: 'both', minWidth: '250px', minHeight: '200px',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '8px 12px', background: darkMode ? '#1c1917' : '#f5f5f5',
+                cursor: 'grab', userSelect: 'none', borderBottom: `1px solid ${theme.border}`,
+              }}
+              onMouseDown={(e) => {
+                setIsDraggingImage(true);
+                setDragOffset({ x: e.clientX - imagePos.x, y: e.clientY - imagePos.y });
+                const onMove = (ev: MouseEvent) => setImagePos({ x: ev.clientX - (e.clientX - imagePos.x), y: ev.clientY - (e.clientY - imagePos.y) });
+                const onUp = () => { setIsDraggingImage(false); window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: '13px', color: theme.text }}>📷 Original Image</h3>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <button onClick={() => setImageSize(s => Math.max(250, s - 100))} style={{ background: 'none', border: `1px solid ${theme.border}`, cursor: 'pointer', fontSize: '13px', color: theme.text, borderRadius: '4px', padding: '1px 6px', lineHeight: '1.4' }} title="Smaller">−</button>
+                <button onClick={() => setImageSize(s => Math.min(900, s + 100))} style={{ background: 'none', border: `1px solid ${theme.border}`, cursor: 'pointer', fontSize: '13px', color: theme.text, borderRadius: '4px', padding: '1px 6px', lineHeight: '1.4' }} title="Bigger">+</button>
+                <button onClick={() => setImageRotation(r => (r + 90) % 360)} style={{ background: 'none', border: `1px solid ${theme.border}`, cursor: 'pointer', fontSize: '13px', color: theme.text, borderRadius: '4px', padding: '1px 6px', lineHeight: '1.4' }} title="Rotate">↻</button>
+                <button onClick={() => setShowImage(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', color: theme.text }} title="Close">✕</button>
+              </div>
             </div>
-            {selectedNote.image_url && (
-              <img
-                src={selectedNote.image_url}
-                alt="Note"
-                style={{ maxWidth: '100%', borderRadius: '8px', border: `1px solid ${theme.border}` }}
-              />
-            )}
+            <div style={{ padding: '0', overflowY: 'auto', overflowX: 'hidden', maxHeight: `calc(100vh - ${imagePos.y + 50}px)` }}>
+              {selectedNote.image_url && (
+                <img
+                  src={selectedNote.image_url}
+                  alt="Note"
+                  draggable={false}
+                  style={{ width: '100%', display: 'block', transform: `rotate(${imageRotation}deg)`, transformOrigin: 'center center', margin: imageRotation % 180 !== 0 ? '20% 0' : '0', transition: 'transform 0.3s ease, margin 0.3s ease' }}
+                />
+              )}
+            </div>
           </div>
         )}
 

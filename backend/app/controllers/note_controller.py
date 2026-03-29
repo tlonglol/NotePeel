@@ -23,28 +23,61 @@ def clean(text: str) -> str:
     return ' '.join(text.split())
 
 
+def _convert_heic_to_jpeg(file_bytes: bytes) -> Tuple[bytes, bool]:
+    """Convert HEIC to JPEG using macOS sips command. No Python HEIC libs needed."""
+    if len(file_bytes) > 12 and file_bytes[4:12] in (b'ftypheic', b'ftypmif1', b'ftypheix', b'ftyphevc'):
+        import subprocess, tempfile, os
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.heic', delete=False) as tmp_in:
+                tmp_in.write(file_bytes)
+                tmp_in_path = tmp_in.name
+            tmp_out_path = tmp_in_path.replace('.heic', '.jpg')
+            subprocess.run(
+                ['sips', '-s', 'format', 'jpeg', '-s', 'formatOptions', '92', tmp_in_path, '--out', tmp_out_path],
+                capture_output=True, check=True, timeout=15
+            )
+            with open(tmp_out_path, 'rb') as f:
+                jpeg_bytes = f.read()
+            os.unlink(tmp_in_path)
+            os.unlink(tmp_out_path)
+            print(f"🔄 Converted HEIC to JPEG for browser display")
+            return jpeg_bytes, True
+        except Exception as e:
+            print(f"⚠️ HEIC conversion failed: {e}")
+            try:
+                os.unlink(tmp_in_path)
+                os.unlink(tmp_out_path)
+            except Exception:
+                pass
+            return file_bytes, False
+    return file_bytes, False
+
+
 def compress_image(file_bytes: bytes, max_width: int = 1500, quality: int = 85) -> Tuple[bytes, str]:
     """
     Compress and resize image before storage.
-    
+
     Args:
         file_bytes: Original image bytes
         max_width: Maximum width in pixels (default 1500 - good for notes)
         quality: JPEG quality 1-100 (default 85 - good balance)
-    
+
     Returns:
         Tuple of (compressed_bytes, mimetype)
     """
+    # Convert HEIC to JPEG first — browsers can't display HEIC
+    file_bytes, was_heic = _convert_heic_to_jpeg(file_bytes)
+
     original_size = len(file_bytes)
-    
+
     # Skip compression for small images (under 200KB) - not worth it
     if original_size < 200 * 1024:
         print(f"⏭️ Image already small ({original_size/1024:.1f}KB), skipping compression")
         return file_bytes, 'image/jpeg'
-    
+
     try:
         img = Image.open(io.BytesIO(file_bytes))
-        
+
         # Skip if image is already small dimensions
         if img.width <= max_width and original_size < 500 * 1024:
             print(f"⏭️ Image already optimized ({img.width}px, {original_size/1024:.1f}KB), skipping compression")

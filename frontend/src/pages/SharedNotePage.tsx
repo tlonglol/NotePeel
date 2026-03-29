@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { notesAPI } from '../services/api';
 import type { SharedNote } from '../types';
+import { renderMathInHTML } from '../utils/mathRenderer';
 
 interface SharedNotePageProps {
   token: string;
@@ -79,7 +80,7 @@ export default function SharedNotePage({ token }: SharedNotePageProps) {
           {/* Note content */}
           <div
             style={{ padding: '24px 30px 40px', lineHeight: '1.75', color: '#333', fontSize: '15px' }}
-            dangerouslySetInnerHTML={{ __html: note.structured_text || note.raw_text || '<em>No content</em>' }}
+            dangerouslySetInnerHTML={{ __html: renderMathInHTML(note.structured_text || note.raw_text || '<em>No content</em>') }}
           />
         </div>
       </div>

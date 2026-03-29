@@ -4,6 +4,24 @@ A full-stack AI-powered note digitization platform that converts handwritten not
 
 Upload a photo of your handwritten notes and get back a clean, formatted digital version that preserves the original layout. Then use AI to generate flashcards, summaries, and explanations to study from your notes.
 
+## Screenshots
+
+| Login | Notebooks |
+|---|---|
+| ![Login](screenshots/login.png) | ![Notebooks](screenshots/notebooks.png) |
+
+| Dashboard | Dark Mode |
+|---|---|
+| ![Dashboard](screenshots/dashboard.png) | ![Dark Mode](screenshots/darkmode.png) |
+
+| Flashcards (Question) | Flashcards (Answer) |
+|---|---|
+| ![Flashcards](screenshots/flashcards.png) | ![Flashcards Answer](screenshots/flashcards_answer.png) |
+
+| AI Summary |
+|---|
+| ![Summary](screenshots/summary.png) |
+
 ## Live Features
 
 - **OCR with layout preservation** — converts handwritten notes into structured HTML, preserving headers, bullet lists, columns, boxed sections, and diagrams
