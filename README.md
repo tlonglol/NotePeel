@@ -49,6 +49,7 @@ Upload a photo of your handwritten notes and get back a clean, formatted digital
 | Auth | JWT + bcrypt, Google OAuth 2.0 |
 | Storage | Cloudflare R2 |
 | Containerization | Docker, Docker Compose |
+| CI/CD | GitHub Actions |
 
 ## Architecture
 
@@ -115,7 +116,19 @@ Upload a photo of your handwritten notes and get back a clean, formatted digital
 
 ## Setup
 
-### Backend
+### Docker (recommended)
+```bash
+# Copy and configure environment files
+cp backend/.env.example backend/.env
+# Edit backend/.env with your API keys
+
+docker compose up --build
+```
+Backend runs at `http://localhost:8000`, frontend at `http://localhost:5173`.
+
+### Manual Setup
+
+#### Backend
 ```bash
 cd backend
 pip install -r requirements.txt
@@ -134,7 +147,7 @@ CF_API_TOKEN=your_cf_token
 uvicorn main:app --reload
 ```
 
-### Frontend
+#### Frontend
 ```bash
 cd frontend
 npm install
