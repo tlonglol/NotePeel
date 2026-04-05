@@ -23,7 +23,7 @@ interface DashboardProps {
   darkMode?: boolean;
 }
 
-export default function Dashboard({ userEmail, onLogout, onOpenSettings, initialNoteId, notebookId, notebookColor, onBack, darkMode = false }: DashboardProps) {
+export default function Dashboard({ userEmail, onLogout, onOpenSettings, initialNoteId, notebookId: _notebookId, notebookColor, onBack, darkMode = false }: DashboardProps) {
   const TABLE_PICKER_MAX_ROWS = 8;
   const TABLE_PICKER_MAX_COLS = 10;
   const [notes, setNotes] = useState<Note[]>([]);
@@ -35,8 +35,8 @@ export default function Dashboard({ userEmail, onLogout, onOpenSettings, initial
   const [imageRotation, setImageRotation] = useState(0);
   const [imagePos, setImagePos] = useState({ x: 100, y: 50 });
   const [imageSize, setImageSize] = useState(400);
-  const [isDraggingImage, setIsDraggingImage] = useState(false);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [_isDraggingImage, setIsDraggingImage] = useState(false);
+  const [_dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [showNotesPanel, setShowNotesPanel] = useState(false);
   const [fontSize, setFontSize] = useState('4');
@@ -83,6 +83,7 @@ export default function Dashboard({ userEmail, onLogout, onOpenSettings, initial
   const [editTitle, setEditTitle] = useState('');
   const [folderMenuNote, setFolderMenuNote] = useState<number | null>(null);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+  const [activeSubjectFilter, setActiveSubjectFilter] = useState<string | null>(null);
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [showPeelingModal, setShowPeelingModal] = useState(false);
   const [isReprocessing, setIsReprocessing] = useState(false);
@@ -734,6 +735,20 @@ export default function Dashboard({ userEmail, onLogout, onOpenSettings, initial
     } catch (err) {
       console.error('Failed to save note metadata:', err);
       setMessage('Failed to save note info');
+    }
+  };
+
+  const assignFolder = async (noteId: number, subject: string) => {
+    try {
+      await notesAPI.update(noteId, { subject: subject || '' });
+      setNotes(notes.map(n => n.id === noteId ? { ...n, subject } : n));
+      if (selectedNote && selectedNote.id === noteId) {
+        setSelectedNote({ ...selectedNote, subject });
+        setEditSubject(subject);
+      }
+      setFolderMenuNote(null);
+    } catch (err) {
+      console.error('Failed to assign folder:', err);
     }
   };
 

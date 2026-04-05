@@ -50,7 +50,7 @@ const getContrastColor = (hex: string) => {
   return luminance > 0.45 ? '#1a1a1a' : '#ffffff';
 };
 
-export default function NotebookView({ notebookId, userEmail, onBack, onOpenNote, onCreateNote, onOpenSettings, onLogout, darkMode = false }: NotebookViewProps) {
+export default function NotebookView({ notebookId, userEmail, onBack, onOpenNote, onCreateNote: _onCreateNote, onOpenSettings, onLogout, darkMode = false }: NotebookViewProps) {
   const [notebook, setNotebook] = useState<NotebookWithNotes | null>(null);
   const [availableNotes, setAvailableNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,6 +74,7 @@ export default function NotebookView({ notebookId, userEmail, onBack, onOpenNote
     shadowSoft: darkMode ? 'rgba(0,0,0,0.3)' : rgbaFromHex(notebookColor, 0.08),
     shadowMedium: darkMode ? 'rgba(0,0,0,0.3)' : rgbaFromHex(notebookColor, 0.14),
     shadowStrong: darkMode ? 'rgba(0,0,0,0.3)' : rgbaFromHex(notebookColor, 0.22),
+    buttonBg: darkMode ? '#3C3836' : '#ffffff',
   };
 
   useEffect(() => {
