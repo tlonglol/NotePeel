@@ -761,7 +761,7 @@ class NoteController:
                         f'<div style="text-align:right;">{right_html}</div>'
                         f'</div>'
                     )
-                else:
+
                     right_x = min(e.get('position', {}).get('x_percent', 50) for e in right_els)
                     left_x = min(e.get('position', {}).get('x_percent', 0) for e in left_els)
                     right_x = max(20, min(80, right_x))
