@@ -34,7 +34,7 @@ def sample_note():
     note.status = ProcessingStatus.COMPLETED
     note.owner_id = 1
     note.image_key = "notes/test-uuid.jpg"
-    note.image_url = "https://r2.example.com/notes/test-uuid.jpg"
+    note.image_url = "https://s3.example.com/notes/test-uuid.jpg"
     note.image_filename = "test.jpg"
     note.image_mimetype = "image/jpeg"
     note.subject = "Biology"
@@ -211,7 +211,7 @@ class TestGetNoteWithImage:
     def test_returns_fresh_url(self, db, user, sample_note):
         db.query.return_value.filter.return_value.first.return_value = sample_note
 
-        fresh_url = "https://r2.example.com/notes/test-uuid.jpg?refreshed=true"
+        fresh_url = "https://s3.example.com/notes/test-uuid.jpg?refreshed=true"
         with patch("app.controllers.note_controller.get_fresh_url", return_value=fresh_url):
             result = NoteController.get_note_with_image(db, 1, user)
 

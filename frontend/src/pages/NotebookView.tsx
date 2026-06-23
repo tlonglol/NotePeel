@@ -133,7 +133,7 @@ export default function NotebookView({ notebookId, userEmail, onBack, onOpenNote
     setShowPeelingModal(true);
 
     try {
-      const newNote = await notesAPI.upload(file, noteType, notebookId);
+      const newNote = await notesAPI.upload(file, noteType);
       // Add to notebook
       await notebooksAPI.addNote(notebookId, newNote.id);
       await loadNotebook();

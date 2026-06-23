@@ -5,7 +5,15 @@ from app.config import get_settings
 
 settings = get_settings()
 
-engine = create_engine(settings.database_url, echo=True)
+# Neon: put the POOLED connection string (the -pooler host) in DATABASE_URL.
+# pool_pre_ping avoids stale-connection errors when Neon scales idle conns to zero;
+# pool_recycle drops connections older than 5 min. echo=False keeps CloudWatch clean.
+engine = create_engine(
+    settings.database_url,
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=300,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

@@ -14,7 +14,9 @@ import type {
   FlashcardSet
 } from '../types';
 
-const API_URL = 'http://127.0.0.1:8000';
+// Backend base URL. Configurable per environment via VITE_API_URL
+// (set at build time); falls back to the local dev server.
+const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 const getToken = (): string | null => localStorage.getItem('token');
 
@@ -86,62 +88,49 @@ export const authAPI = {
     fetchWithAuth('/api/auth/google', { method: 'POST', body: JSON.stringify({ credential }) }),
 };
 
+// Request presigned URLs, then PUT each file directly to S3.
+// Keeps large uploads off the Lambda Function URL (6MB request limit).
+async function presignAndPut(files: File[]): Promise<string[]> {
+  const { uploads } = await fetchWithAuth<{ uploads: Array<{ key: string; url: string }> }>(
+    '/api/notes/upload-url',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        files: files.map(f => ({ filename: f.name, content_type: f.type || 'image/jpeg' })),
+      }),
+    }
+  );
+
+  await Promise.all(
+    uploads.map((u, i) =>
+      fetch(u.url, {
+        method: 'PUT',
+        headers: { 'Content-Type': files[i].type || 'image/jpeg' },
+        body: files[i],
+      }).then(r => {
+        if (!r.ok) throw new Error('Upload to storage failed');
+      })
+    )
+  );
+
+  return uploads.map(u => u.key);
+}
+
 export const notesAPI = {
-  upload: async (file: File, noteType: string = 'default', notebookId?: number): Promise<Note> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    
-    const token = getToken();
-    let url = `${API_URL}/api/notes/upload?note_type=${noteType}`;
-    if (notebookId) {
-      url += `&notebook_id=${notebookId}`;
-    }
-    
-    const response = await fetch(url, {
+  upload: async (file: File, noteType: string = 'default'): Promise<Note> => {
+    const [key] = await presignAndPut([file]);
+    return fetchWithAuth(`/api/notes/process?note_type=${noteType}`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: formData,
+      body: JSON.stringify({ keys: [key], filenames: [file.name] }),
     });
-    
-    // Handle 401 for file upload too
-    if (response.status === 401) {
-      handleTokenExpired();
-      throw new Error('Session expired. Please log in again.');
-    }
-    
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
-      throw new Error(error.detail || 'Upload failed');
-    }
-    
-    return response.json();
   },
-  
+
   uploadMultiPage: async (files: File[], noteType: string = 'default', title?: string): Promise<Note> => {
-    const formData = new FormData();
-    files.forEach(f => formData.append('files', f));
-    if (title) formData.append('title', title);
-
-    const token = getToken();
-    const url = `${API_URL}/api/notes/upload-multi?note_type=${noteType}`;
-
-    const response = await fetch(url, {
+    const keys = await presignAndPut(files);
+    return fetchWithAuth(`/api/notes/process?note_type=${noteType}`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-      body: formData,
+      body: JSON.stringify({ keys, filenames: files.map(f => f.name), title }),
     });
-
-    if (response.status === 401) {
-      handleTokenExpired();
-      throw new Error('Session expired. Please log in again.');
-    }
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
-      throw new Error(error.detail || 'Upload failed');
-    }
-
-    return response.json();
   },
 
   getAll: (): Promise<Note[]> => fetchWithAuth('/api/notes/'),

@@ -21,8 +21,8 @@ class Note(Base):
 
     # REMOVED: original_image = Column(LargeBinary, nullable=False)
 
-    # R2 blob storage
-    image_key = Column(String(500), nullable=True)    # R2 object key
+    # S3 blob storage
+    image_key = Column(String(500), nullable=True)    # S3 object key
     image_url = Column(String(1000), nullable=True)   # presigned URL (refreshed on access)
 
     image_filename = Column(String(255), nullable=True)

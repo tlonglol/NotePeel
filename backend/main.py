@@ -8,7 +8,7 @@ from fastapi import FastAPI, UploadFile, File, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from app.database import create_tables, get_db
+from app.database import get_db
 from app.routes.auth_routes import router as auth_router
 from app.routes.note_routes import router as note_router
 from app.routes.notebook_routes import router as notebook_router
@@ -42,10 +42,8 @@ app.include_router(notebook_router)
 app.include_router(ai_router)
 
 
-@app.on_event("startup")
-def startup_event():
-    """Create database tables on startup."""
-    create_tables()
+# Tables are created out-of-band via `python -m scripts.migrate`, not on startup —
+# avoids running DDL against Neon on every Lambda cold start.
 
 
 # OCR endpoint (no auth - for testing)

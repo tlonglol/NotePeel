@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+region               = "us-east-1"
+images_bucket_name   = "notepeel-images"
+frontend_bucket_name = "notepeel-frontend"
+
+# Set to the CloudFront URL after the first apply (or your custom domain).
+allowed_origin = "*"
+
+# Secrets — use your ROTATED keys, not the old leaked ones.
+database_url     = "postgresql://USER:PASSWORD@ep-xxxx-pooler.REGION.aws.neon.tech/notepeel?sslmode=require"
+gemini_api_key   = "PASTE_ROTATED_GEMINI_KEY"
+google_client_id = "984288833957-itm4mctkda4mija9g8ekieh6nitnj0t1.apps.googleusercontent.com"
+cf_account_id    = "PASTE_CLOUDFLARE_ACCOUNT_ID"
+cf_api_token     = "PASTE_ROTATED_CLOUDFLARE_WORKERS_AI_TOKEN"

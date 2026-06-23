@@ -38,10 +38,10 @@ jobs:
         env:
           DATABASE_URL: "sqlite:///test.db"
           GEMINI_API_KEY: "test"
-          R2_ENDPOINT: "test"
-          R2_ACCESS_KEY_ID: "test"
-          R2_SECRET_ACCESS_KEY: "test"
-          R2_BUCKET_NAME: "test"
+          S3_BUCKET_NAME: "test"
+          S3_REGION: "us-east-1"
+          S3_ACCESS_KEY_ID: "test"
+          S3_SECRET_ACCESS_KEY: "test"
           CF_ACCOUNT_ID: "test"
           CF_API_TOKEN: "test"
 
@@ -86,3 +86,20 @@ jobs:
 
       - name: Build frontend image
         run: docker build -t notepeel-frontend ./frontend
+
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # No backend/creds needed: validate is a static check.
+      - name: Terraform init (no backend)
+        run: terraform -chdir=infra init -backend=false
+
+      - name: Terraform validate
+        run: terraform -chdir=infra validate

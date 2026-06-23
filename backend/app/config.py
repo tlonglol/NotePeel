@@ -6,12 +6,12 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
 
-    #cloudflare r2 settings
-    r2_endpoint: str = ""
-    r2_access_key_id: str = ""
-    r2_secret_access_key: str = ""
-    r2_bucket_name: str = ""
-    r2_account_id: str = ""
+    # AWS S3 settings (also works with any S3-compatible endpoint)
+    s3_bucket_name: str = ""
+    s3_region: str = "us-east-1"
+    s3_access_key_id: str = ""        # optional: omit to use an IAM role on AWS
+    s3_secret_access_key: str = ""    # optional: omit to use an IAM role on AWS
+    s3_endpoint: str = ""             # optional: only for S3-compatible providers
 
 
 

@@ -1,14 +1,71 @@
+import uuid
 from typing import Optional, List
 from fastapi import APIRouter, Depends, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.schemas.note_schema import NoteUpdate
 from app.models.user import User
 from app.controllers.note_controller import note_controller
 from app.controllers.auth_controller import get_current_user
+from app.services.storage import generate_presigned_put
 
 router = APIRouter(prefix="/api/notes", tags=["Notes"])
+
+
+class PresignItem(BaseModel):
+    filename: str
+    content_type: str = "image/jpeg"
+
+
+class PresignRequest(BaseModel):
+    files: List[PresignItem]
+
+
+class ProcessRequest(BaseModel):
+    keys: List[str]
+    filenames: Optional[List[str]] = None
+    title: Optional[str] = None
+
+
+@router.post("/upload-url")
+def create_upload_urls(
+    body: PresignRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Return presigned S3 PUT URL(s); the browser uploads images directly to S3,
+    bypassing the Lambda Function URL 6MB request limit."""
+    uploads = []
+    for f in body.files:
+        ext = (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "jpg").lower()
+        key = f"notes/{current_user.id}/{uuid.uuid4()}.{ext}"
+        uploads.append(generate_presigned_put(key, f.content_type))
+    return {"uploads": uploads}
+
+
+@router.post("/process")
+async def process_uploaded(
+    body: ProcessRequest,
+    note_type: str = Query(default="default", enum=["default", "lecture", "meeting"]),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Run sync OCR on already-uploaded S3 object(s) and create the note."""
+    note = await note_controller.create_note_from_keys(
+        db, body.keys, current_user, body.title, note_type, body.filenames
+    )
+    return {
+        "id": note.id,
+        "title": note.title,
+        "image_filename": note.image_filename,
+        "status": note_controller._get_public_status(note),
+        "created_at": note.created_at,
+        "processed_at": note.processed_at,
+        "raw_text": note.raw_text,
+        "structured_text": note.structured_text,
+        "error_message": note.error_message,
+    }
 
 
 @router.post("/upload")

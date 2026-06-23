@@ -1,7 +1,10 @@
 # API Framework
 fastapi==0.102.0
-uvicorn[standard]==0.23.2
+uvicorn==0.23.2          # no [standard] extras (uvloop/watchfiles) — unused under Mangum on Lambda
 python-multipart>=0.0.6
+
+# Lambda ASGI adapter
+mangum>=0.17.0
 
 # Environment
 python-dotenv==1.0.1
@@ -23,8 +26,9 @@ email-validator>=2.0.0
 # Gemini AI
 google-genai
  
-# cloudflare r2 is s3 compatible so boto3
+# AWS S3 object storage (also supports S3-compatible endpoints)
 boto3>=1.28.0
 
 # Image Processing
 Pillow>=10.0.0
+pillow-heif>=0.16.0      # HEIC decoding (cross-platform; replaces macOS-only `sips`)

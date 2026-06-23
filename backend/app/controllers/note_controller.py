@@ -11,7 +11,7 @@ import re
 from app.models.note import Note, ProcessingStatus
 from app.models.user import User
 from app.schemas.note_schema import NoteUpdate
-from app.services.storage import upload_image, delete_image, get_fresh_url, download_image
+from app.services.storage import upload_image, delete_image, get_fresh_url, download_image, put_image
 from app.database import SessionLocal
 
 import sys
@@ -24,31 +24,18 @@ def clean(text: str) -> str:
 
 
 def _convert_heic_to_jpeg(file_bytes: bytes) -> Tuple[bytes, bool]:
-    """Convert HEIC to JPEG using macOS sips command. No Python HEIC libs needed."""
+    """Convert HEIC to JPEG using pillow-heif (cross-platform; works on Lambda)."""
     if len(file_bytes) > 12 and file_bytes[4:12] in (b'ftypheic', b'ftypmif1', b'ftypheix', b'ftyphevc'):
-        import subprocess, tempfile, os
         try:
-            with tempfile.NamedTemporaryFile(suffix='.heic', delete=False) as tmp_in:
-                tmp_in.write(file_bytes)
-                tmp_in_path = tmp_in.name
-            tmp_out_path = tmp_in_path.replace('.heic', '.jpg')
-            subprocess.run(
-                ['sips', '-s', 'format', 'jpeg', '-s', 'formatOptions', '92', tmp_in_path, '--out', tmp_out_path],
-                capture_output=True, check=True, timeout=15
-            )
-            with open(tmp_out_path, 'rb') as f:
-                jpeg_bytes = f.read()
-            os.unlink(tmp_in_path)
-            os.unlink(tmp_out_path)
-            print(f"🔄 Converted HEIC to JPEG for browser display")
-            return jpeg_bytes, True
+            from pillow_heif import register_heif_opener
+            register_heif_opener()
+            img = Image.open(io.BytesIO(file_bytes)).convert('RGB')
+            output = io.BytesIO()
+            img.save(output, format='JPEG', quality=92)
+            print("🔄 Converted HEIC to JPEG for browser display")
+            return output.getvalue(), True
         except Exception as e:
             print(f"⚠️ HEIC conversion failed: {e}")
-            try:
-                os.unlink(tmp_in_path)
-                os.unlink(tmp_out_path)
-            except Exception:
-                pass
             return file_bytes, False
     return file_bytes, False
 
@@ -318,7 +305,7 @@ class NoteController:
     ) -> Note:
         file_content = await file.read()
 
-        # Compress image before uploading to R2 (saves storage & bandwidth)
+        # Compress image before uploading to S3 (saves storage & bandwidth)
         compressed_content, compressed_mimetype = compress_image(file_content)
         
         # Use compressed image for storage, but original for OCR (better quality)
@@ -490,6 +477,121 @@ class NoteController:
         return note
 
     @staticmethod
+    def _ocr_page_to_html(content: bytes, note_type: str) -> Tuple[str, str]:
+        """Run OCR on one image and return (raw_text, structured_html). Raises on error."""
+        ocr_result = extract_structured_text(content, note_type=note_type)
+        if ocr_result.get('error'):
+            raise Exception(ocr_result['error'])
+
+        elements = ocr_result.get('elements', [])
+        sorted_elements = sorted(
+            elements,
+            key=lambda e: (
+                e.get('position', {}).get('y_percent', 0),
+                e.get('position', {}).get('x_percent', 0)
+            )
+        )
+        cleaned_elements = NoteController._clean_elements(sorted_elements)
+        raw_text = ocr_result.get('raw_text', '')
+        page_layout = ocr_result.get('page_layout', 'unknown')
+        structured_html = NoteController._select_structured_html(cleaned_elements, raw_text, page_layout)
+        return raw_text, structured_html
+
+    @staticmethod
+    async def create_note_from_keys(
+        db: Session,
+        keys: List[str],
+        user: User,
+        title: Optional[str] = None,
+        note_type: str = "default",
+        filenames: Optional[List[str]] = None,
+    ) -> Note:
+        """Create a note from image(s) already uploaded to S3 via presigned PUT.
+
+        The browser uploads originals straight to S3 (bypassing the Lambda 6MB
+        payload limit); here we OCR them and store a display-friendly
+        (HEIC-converted, compressed) version back to the same key.
+        """
+        if not keys:
+            raise HTTPException(status_code=400, detail="No image keys provided")
+
+        filenames = filenames or [k.rsplit("/", 1)[-1] for k in keys]
+
+        # Pull originals from S3 and overwrite each with a normalized display version.
+        originals: List[bytes] = []
+        for key in keys:
+            raw = download_image(key)
+            originals.append(raw)
+            display_bytes, display_mime = compress_image(raw)
+            put_image(key, display_bytes, display_mime)
+
+        first_name = filenames[0]
+        note_title = (
+            (title or f"{first_name} (+{len(keys) - 1} pages)")
+            if len(keys) > 1
+            else (title or first_name)
+        )
+
+        note = Note(
+            title=note_title,
+            image_key=keys[0],
+            image_url=get_fresh_url(keys[0]),
+            image_filename=first_name,
+            image_mimetype="image/jpeg",
+            status=ProcessingStatus.PROCESSING,
+            owner_id=user.id,
+        )
+        db.add(note)
+        db.commit()
+        db.refresh(note)
+
+        all_raw_texts: List[str] = []
+        all_html_parts: List[str] = []
+        failed_pages: List[int] = []
+
+        for i, content in enumerate(originals):
+            page_num = i + 1
+            try:
+                # OCR the HEIC-converted, full-resolution original for best quality.
+                ocr_bytes, _ = _convert_heic_to_jpeg(content)
+                raw_text, structured_html = NoteController._ocr_page_to_html(ocr_bytes, note_type)
+                all_raw_texts.append(raw_text)
+                all_html_parts.append(structured_html)
+            except Exception as e:
+                failed_pages.append(page_num)
+                all_raw_texts.append(f"[Page {page_num} failed: {e}]")
+                all_html_parts.append(
+                    f'<p style="color:#EF5350;font-style:italic;">[Page {page_num} extraction failed]</p>'
+                )
+
+        page_divider_html = '<hr style="border:none;border-top:2px dashed #FFB74D;margin:24px 0;">'
+
+        try:
+            note.raw_text = "\n\n".join(all_raw_texts)
+            note.structured_text = page_divider_html.join(all_html_parts)
+            note.status = ProcessingStatus.COMPLETED if len(failed_pages) < len(keys) else ProcessingStatus.FAILED
+            note.error_message = f"Pages {', '.join(map(str, failed_pages))} failed" if failed_pages else None
+            note.processed_at = datetime.utcnow()
+            db.commit()
+            db.refresh(note)
+        except Exception as e:
+            note.status = ProcessingStatus.FAILED
+            note.error_message = str(e)
+            db.commit()
+            db.refresh(note)
+            return note
+
+        try:
+            from app.controllers.ai_controller import ai_controller
+            await ai_controller.auto_categorize(db, note)
+        except Exception as e:
+            db.rollback()
+            print(f"⚠️ Auto-categorization failed for note {note.id}: {e}")
+            db.refresh(note)
+
+        return note
+
+    @staticmethod
     def get_note_with_image(db: Session, note_id: int, user: User) -> dict:
         note = NoteController.get_note(db, note_id, user)
 
@@ -517,7 +619,7 @@ class NoteController:
     def delete_note(db: Session, note_id: int, user: User) -> None:
         note = NoteController.get_note(db, note_id, user)
 
-        # Delete from R2 before removing DB record
+        # Delete from S3 before removing DB record
         if note.image_key:
             delete_image(note.image_key)
 
