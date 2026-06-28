@@ -6,3 +6,6 @@ terraform.tfvars
 .terraform.lock.hcl
 build/
 crash.log
+# Saved plan files bake in variable values (secrets) — never commit
+tfplan
+*.tfplan

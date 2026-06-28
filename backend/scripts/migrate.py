@@ -4,6 +4,7 @@ Run on deploy (not per request):  python -m scripts.migrate
 Creates tables and applies the lightweight schema repairs in app.database.
 """
 from app.database import create_tables
+import app.models  # noqa: F401 — registers every model on Base.metadata so create_all() sees them
 
 if __name__ == "__main__":
     create_tables()

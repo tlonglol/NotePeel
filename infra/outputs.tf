@@ -8,10 +8,20 @@ output "cloudfront_domain" {
   value       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
 }
 
+output "cloudfront_distribution_id" {
+  description = "CloudFront distribution ID, for cache invalidations."
+  value       = aws_cloudfront_distribution.frontend.id
+}
+
 output "images_bucket" {
   value = aws_s3_bucket.images.bucket
 }
 
 output "frontend_bucket" {
   value = aws_s3_bucket.frontend.bucket
+}
+
+output "nameservers" {
+  description = "Set these as Namecheap's Custom DNS nameservers to delegate the domain to Route 53."
+  value       = aws_route53_zone.main.name_servers
 }

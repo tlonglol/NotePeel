@@ -40,11 +40,20 @@ resource "aws_lambda_function_url" "api" {
   function_name      = aws_lambda_function.api.function_name
   authorization_type = "NONE"
 
-  cors {
-    allow_origins  = [var.allowed_origin, "http://localhost:5173"]
-    allow_methods  = ["*"]
-    allow_headers  = ["authorization", "content-type"]
-    expose_headers = ["content-type"]
-    max_age        = 3600
-  }
+  # NOTE: CORS is handled by FastAPI's CORSMiddleware (backend/main.py), which
+  # also covers local dev. Do NOT configure a `cors {}` block here too — both
+  # layers add an Access-Control-Allow-Origin header, producing a duplicate
+  # "*, *" value that browsers reject. To lock CORS down later, change
+  # allow_origins in CORSMiddleware to the CloudFront domain.
+}
+
+# Required for a NONE-auth Function URL to be publicly invokable. Terraform does
+# not add this automatically (the AWS console does), so without it every request
+# to the Function URL returns 403 Forbidden.
+resource "aws_lambda_permission" "function_url" {
+  statement_id           = "FunctionURLAllowPublicAccess"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.api.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
 }

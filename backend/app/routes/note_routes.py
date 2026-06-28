@@ -114,7 +114,10 @@ async def upload_multi_page_note(
     }
 
 
-@router.get("/")
+# No trailing slash: behind the Lambda Function URL the trailing slash is
+# stripped before FastAPI sees it, and "/api/notes/" would 307-loop. Matching
+# "/api/notes" avoids the redirect.
+@router.get("")
 def get_notes(
     skip: int = 0,
     limit: int = 100,

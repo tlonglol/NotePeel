@@ -8,6 +8,12 @@ variable "project" {
   default = "notepeel"
 }
 
+variable "domain_name" {
+  type        = string
+  default     = "notepeel.xyz"
+  description = "Apex custom domain served via CloudFront."
+}
+
 variable "images_bucket_name" {
   type        = string
   default     = "notepeel-images"

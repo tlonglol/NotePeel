@@ -16,7 +16,8 @@ import type {
 
 // Backend base URL. Configurable per environment via VITE_API_URL
 // (set at build time); falls back to the local dev server.
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+// Strip any trailing slash(es) so `${API_URL}/api/...` never doubles up.
+const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
 
 const getToken = (): string | null => localStorage.getItem('token');
 

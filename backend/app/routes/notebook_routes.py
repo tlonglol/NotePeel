@@ -16,7 +16,9 @@ from app.schemas.notebook_schema import (
 router = APIRouter(prefix="/api/notebooks", tags=["notebooks"])
 
 
-@router.post("/", response_model=dict, status_code=status.HTTP_201_CREATED)
+# No trailing slash — the Lambda Function URL strips it before FastAPI, so
+# "/api/notebooks/" 307-loops. Matching "/api/notebooks" avoids the redirect.
+@router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
 def create_notebook(
     data: NotebookCreate,
     db: Session = Depends(get_db),
@@ -35,7 +37,7 @@ def create_notebook(
     }
 
 
-@router.get("/", response_model=List[dict])
+@router.get("", response_model=List[dict])
 def get_notebooks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)

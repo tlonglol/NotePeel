@@ -16,7 +16,8 @@ resource "aws_s3_bucket_cors_configuration" "images" {
   bucket = aws_s3_bucket.images.id
   cors_rule {
     allowed_methods = ["PUT", "GET"]
-    allowed_origins = [var.allowed_origin, "http://localhost:5173"]
+    # Keep in step with the Function URL CORS (single origin; "*" by default).
+    allowed_origins = [var.allowed_origin]
     allowed_headers = ["*"]
     expose_headers  = ["ETag"]
     max_age_seconds = 3600
