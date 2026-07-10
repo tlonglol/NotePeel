@@ -1,5 +1,8 @@
 # NotePeel
 
+### 🔗 Live demo → **[notepeel.xyz](https://notepeel.xyz)**
+No sign-up required — just click **"Try the live demo"** to explore a sample account instantly.
+
 A full-stack AI-powered note digitization platform that converts handwritten notes into structured, editable documents with built-in study tools.
 
 Upload a photo of your handwritten notes and get back a clean, formatted digital version that preserves the original layout. Then use AI to generate flashcards, summaries, and explanations to study from your notes.
