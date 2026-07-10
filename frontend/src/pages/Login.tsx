@@ -110,6 +110,20 @@ export default function Login({ onLogin, onSwitchToRegister }: LoginProps) {
     }
   };
 
+  // One-click demo: logs into the shared public demo account (no sign-up).
+  const handleDemo = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const response = await authAPI.login({ email: 'demo@notepeel.xyz', password: 'demodemo123' });
+      onLogin(response.access_token, 'demo@notepeel.xyz');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Demo is unavailable right now');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div style={{
       minHeight: '100vh',
@@ -144,6 +158,34 @@ export default function Login({ onLogin, onSwitchToRegister }: LoginProps) {
           </div>
         )}
         
+        <button
+          onClick={handleDemo}
+          disabled={loading}
+          style={{
+            width: '100%',
+            padding: '14px',
+            background: loading ? '#ccc' : 'linear-gradient(135deg, #66BB6A 0%, #43A047 100%)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '16px',
+            fontWeight: 'bold',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            marginBottom: '6px'
+          }}
+        >
+          {loading ? 'Loading demo…' : '👀 Try the live demo'}
+        </button>
+        <p style={{ textAlign: 'center', margin: '0 0 18px', color: '#8D6E63', fontSize: '13px' }}>
+          No sign-up — explore a sample account instantly
+        </p>
+
+        <div style={{ display: 'flex', alignItems: 'center', margin: '0 0 18px', gap: '10px' }}>
+          <div style={{ flex: 1, height: '1px', background: '#FFE082' }} />
+          <span style={{ color: '#8D6E63', fontSize: '13px' }}>or sign in</span>
+          <div style={{ flex: 1, height: '1px', background: '#FFE082' }} />
+        </div>
+
         <input
           type="email"
           placeholder="Email"
