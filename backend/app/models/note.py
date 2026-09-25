@@ -23,7 +23,7 @@ class Note(Base):
 
     # S3 blob storage
     image_key = Column(String(500), nullable=True)    # S3 object key
-    image_url = Column(String(1000), nullable=True)   # presigned URL (refreshed on access)
+    image_url = Column(Text, nullable=True)           # presigned URL (refreshed on access); TEXT because IAM-role (STS) signed URLs exceed varchar(1000)
 
     image_filename = Column(String(255), nullable=True)
     image_mimetype = Column(String(100), nullable=True)
@@ -47,6 +47,11 @@ class Note(Base):
     # Sharing
     share_token = Column(String(36), unique=True, index=True, nullable=True)
 
+    # Retrieval index state (see app.rag.ingest). index_hash is a hash of the
+    # source text + chunker config; unchanged hash => re-ingestion is skipped.
+    index_hash = Column(String(64), nullable=True)
+    indexed_at = Column(DateTime, nullable=True)
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     processed_at = Column(DateTime, nullable=True)
@@ -59,3 +64,9 @@ class Note(Base):
     
     # Relationship to notebooks (many-to-many)
     notebooks = relationship("Notebook", secondary="note_notebooks", back_populates="notes")
+
+    # Retrieval chunks. passive_deletes lets the DB-level ON DELETE CASCADE do the work.
+    chunks = relationship(
+        "NoteChunk", back_populates="note", cascade="all, delete-orphan",
+        passive_deletes=True, order_by="NoteChunk.ordinal",
+    )

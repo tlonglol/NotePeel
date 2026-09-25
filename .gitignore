@@ -41,3 +41,11 @@ Thumbs.db
 frontend/node_modules/
 frontend/dist/
 frontend/build/
+backend/.env.test
+
+# Real eval photos stay local; their OCR JSON transcripts are committed
+backend/eval/corpus/real/*.jpg
+backend/eval/corpus/real/*.jpeg
+backend/eval/corpus/real/*.png
+backend/eval/corpus/real/*.heic
+backend/eval/corpus/real/*.webp

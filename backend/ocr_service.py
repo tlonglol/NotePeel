@@ -6,7 +6,19 @@ import io
 from google import genai
 from PIL import Image, ImageFilter, ImageOps
 
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+_client = None
+
+
+def _get_client():
+    """Lazily build the Gemini client so importing this module (and anything
+    that imports it, like the note controller) does not require GEMINI_API_KEY.
+    The key is only needed when OCR actually runs."""
+    global _client
+    if _client is None:
+        _client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    return _client
+
+
 STRUCTURED_MODEL = "gemini-2.5-flash"
 PLAIN_TEXT_MODEL = "gemini-2.5-flash-lite"
 
@@ -165,7 +177,7 @@ def _normalize_json_response(raw: str) -> str:
 
 
 def _generate_content(prompt: str, image_bytes: bytes, mime: str, config: dict, model: str = STRUCTURED_MODEL) -> str:
-    response = client.models.generate_content(
+    response = _get_client().models.generate_content(
         model=model,
         contents=[
             prompt,

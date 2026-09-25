@@ -1,6 +1,8 @@
 services:
   db:
-    image: postgres:15
+    # pgvector image so local dev and eval runs match Neon (vector + FTS).
+    # If you had the old postgres:15 volume: `docker compose down -v` once to reset it.
+    image: pgvector/pgvector:pg16
     container_name: notepeel-db
     environment:
       POSTGRES_DB: notepeel
@@ -37,6 +39,23 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+
+  # Retrieval eval harness: `docker compose --profile eval run --rm eval`
+  # Migrates the compose database to head, then runs the eval and prints the tables.
+  eval:
+    build:
+      context: ./backend
+    profiles: ["eval"]
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/notepeel
+      EVAL_DATABASE_URL: postgresql://postgres:postgres@db:5432/notepeel
+    depends_on:
+      - db
+    volumes:
+      - ./backend:/app
+    command: sh -c "python -m scripts.migrate && python -m eval.run_eval --modes ilike,fts_and,fts_or --chunking window,section,note,window:60:100"
 
 volumes:
   postgres_data:

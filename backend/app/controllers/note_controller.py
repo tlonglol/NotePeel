@@ -12,6 +12,7 @@ from app.models.note import Note, ProcessingStatus
 from app.models.user import User
 from app.schemas.note_schema import NoteUpdate
 from app.services.storage import upload_image, delete_image, get_fresh_url, download_image, put_image
+from app.rag.ingest import safe_ingest
 from app.database import SessionLocal
 
 import sys
@@ -366,6 +367,9 @@ class NoteController:
             db.refresh(note)
             return note
 
+        # Index the note for retrieval. Never raises; failures are logged.
+        safe_ingest(db, note)
+
         try:
             # Auto-categorize using Workers AI after OCR succeeds.
             # Categorization failures should never overwrite a successful extraction.
@@ -465,6 +469,9 @@ class NoteController:
             db.commit()
             db.refresh(note)
             return note
+
+        # Index the note for retrieval. Never raises; failures are logged.
+        safe_ingest(db, note)
 
         try:
             from app.controllers.ai_controller import ai_controller
@@ -580,6 +587,9 @@ class NoteController:
             db.commit()
             db.refresh(note)
             return note
+
+        # Index the note for retrieval. Never raises; failures are logged.
+        safe_ingest(db, note)
 
         try:
             from app.controllers.ai_controller import ai_controller
@@ -949,6 +959,9 @@ class NoteController:
             setattr(note, field, value)
         db.commit()
         db.refresh(note)
+        # Edits to the visible text or title change the chunks; re-index (no-op if the hash is unchanged).
+        if "structured_text" in update_dict or "title" in update_dict:
+            safe_ingest(db, note)
         return note
 
 
