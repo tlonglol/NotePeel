@@ -179,3 +179,171 @@ questions. Database: Neon (pooled), queried from a dev machine.
 The 18 questions whose first hit is below rank 1 under fts_or, and the 5 with chunk
 R@5 below 1 (q022, q046, q060, q064, q079). q046 is a pure vocabulary gap
 ("quadrupling" vs "4x", "margin of error" vs "ME"); q022 and q079 are the IDF flaw.
+
+---
+
+## Phase 2: dense retrieval and fusion (2026-09-25 to 26)
+
+Results files: `backend/eval/results/20260926T015642.json` (main run, section chunks,
+live latency) and `20260926T015909.json` (fusion parameter sweep, accuracy only).
+Same corpus and question set as Phase 1. Latency n: 360 for database-only modes
+(72 questions x 5 repeats), 144 for modes that call the embedding API per query
+(72 x 2, paced under the rate limit, see D16).
+
+### D15. Embedding model: gemini-embedding-001 truncated to 768 dimensions
+
+- **Chose:** `gemini-embedding-001` with `output_dimensionality=768`, L2-normalized
+  client-side, asymmetric task types (RETRIEVAL_DOCUMENT for chunks, RETRIEVAL_QUERY
+  for questions). Same API key OCR already uses.
+- **Rejected:** the default 3072 dimensions (4x the storage and scan cost; the model is
+  trained with Matryoshka representation learning so the truncated prefix keeps most
+  of the quality). The 768 vs 1536 comparison is a Phase 4 ablation. A second model
+  (Bedrock Titan v2) is a full-version item.
+- **Measured:** one query embedding p50 200 ms, p95 338 ms (n=144) from the dev
+  machine. Embedding the 189-chunk corpus: 51 batched calls (one per note), 42 s
+  including rate-limit retries.
+
+### D16. The API key is on the free tier: 100 embedding requests per minute
+
+- **Found when:** the first latency pass fired 1,080 live embedding calls and hit
+  429 with "retry in 35 s" while the retry logic capped its wait at 16 s.
+- **Changes:** retries now parse and honor the server's `retryDelay` (cap 45 s, 6
+  attempts). Ingestion embeds one batched call per note, not per chunk, which is why
+  a 189-chunk corpus costs 51 requests. The harness paces live calls at 90/min, uses
+  2 repeats for embedding-backed modes, and caches query embeddings on disk so every
+  accuracy pass costs zero API calls (re-running the full Phase 2 accuracy grid made
+  7 calls, all for new questions).
+- **Production implication:** more than about 100 note uploads per minute would leave
+  some notes lexically indexed but un-embedded. That path is handled: the ingest
+  result is "partial", the note stays un-hashed, and the next ingest or backfill
+  embeds it (D22). Moving to the paid tier is a one-line change and not needed at
+  this usage.
+
+### D17. A 30-line vector column type instead of the pgvector Python package
+
+- **Chose:** `app/rag/vector_type.py`: formats a list as the `[...]` text literal on
+  the way in and parses it on the way out. Queries cast explicitly with
+  `CAST(:q AS vector)`.
+- **Rejected:** the `pgvector` package, which depends on numpy (about 25 MB in the
+  Lambda bundle) to do the same two conversions. Cost of the choice: `alembic check`
+  logs one warning that it cannot reflect the `vector` type; it still detects drift
+  on every other column.
+
+### D18. No ANN index: exact cosine scan filtered by owner
+
+- **Chose:** `ORDER BY embedding <=> query` with `WHERE owner_id = :u` and no index.
+  The largest user (the eval corpus) has 189 chunks.
+- **Rejected:** HNSW at this scale. With an owner filter, HNSW walks the graph first
+  and filters after, which can return fewer than k rows or miss the true nearest
+  neighbours, and the build cost buys nothing at hundreds of rows.
+- **Measured:** vector stage p50 27 ms, p95 66 ms inside the hybrid path (n=144),
+  which at this size is mostly the round trip to Neon. Scale test (random unit
+  vectors under one owner, timings from the dev machine, `eval/results/scale_test.log`):
+
+  | chunks under one owner | exact scan p50 ms | exact p95 ms | HNSW p50 ms | HNSW build s | HNSW recall@10 vs exact | queries |
+  |---|---|---|---|---|---|---|
+  | 200 | 39.0 | 39.8 | 20.8 | 0.1 | 1.000 | 20 x 3 repeats |
+  | 2,000 | 45.2 | 46.1 | 20.8 | 1.3 | 0.645 | 20 x 3 repeats |
+  | 10,000 | 70.4 | 71.3 | 53.2 | 12.6 | 1.000 | 20 x 3 repeats |
+
+  Reading it: the exact scan adds about 30 ms going from 200 to 10,000 chunks per
+  user, on top of a round trip that is itself about 20 ms. HNSW saves 17 ms at 10,000
+  rows for a 12.6 s index build, and the 0.645 recall at 2,000 rows is the known
+  worst case for HNSW: random high-dimensional points have no cluster structure and
+  `ef_search=40` is the default, not a tuned value. Real embeddings cluster and would
+  score higher, so this row overstates the risk and the timing rows are the point.
+  Crossover: an owner would need on the order of 10,000 chunks (about 2,700 notes at
+  3.7 chunks each) before an index is worth its build cost and its filtered-recall
+  caveat. The largest real user has 4 notes.
+
+  TOAST check (`eval/storage_test.py`): a 768-float vector is ~3 KB, above the 2 KB
+  TOAST threshold, and pgvector's default storage for the type is EXTERNAL
+  (out-of-line, uncompressed), so each scanned row is fetched from the TOAST
+  relation. On the real 189-chunk corpus: EXTERNAL p50 21.0 ms, p95 23.1; PLAIN
+  p50 20.6 ms, p95 22.0 (n=300 each). No measurable effect at this size, so no
+  storage migration. Side finding: the deleted scale-test rows left 82 MB of TOAST
+  bloat until `VACUUM FULL` ran; bulk-deleting vectors needs a vacuum afterwards.
+
+### D19. Vector-only beats the hybrid on this corpus; hybrid ships behind a flag
+
+- **Measured** (section chunks, n=67 headline questions):
+
+  | mode | chunk R@1 | chunk R@5 | chunk MRR@10 | note MRR@10 |
+  |---|---|---|---|---|
+  | fts_or | 0.694 [0.58, 0.80] | 0.955 [0.90, 0.99] | 0.848 [0.78, 0.91] | 0.908 |
+  | vector | 0.918 [0.87, 0.96] | 1.000 [1.00, 1.00] | 0.993 [0.98, 1.00] | 1.000 |
+  | hybrid, RRF k=60, equal weights | 0.821 [0.74, 0.90] | 1.000 [1.00, 1.00] | 0.938 [0.90, 0.98] | 0.993 |
+
+  Per question (`python -m eval.compare`): of the 18 questions FTS had below rank 1,
+  vector fixed 17 to rank 1 and improved the 18th (q060, rank 5 to 2). Equal-weight
+  hybrid fixed 9, improved 4, left 5 unchanged, and pushed 8 questions that vector had
+  at rank 1 down to rank 2 or 3.
+- **Why fusion hurt:** with k=60 and 20 candidates per list, a chunk ranked first in
+  one list alone scores 1/61 = 0.0164, while a chunk ranked 2nd in vector and 20th in
+  FTS scores 1/62 + 1/80 = 0.0286. Any chunk present in both top-20 lists outranks
+  any chunk present in one, whatever the positions. The lexical list has no IDF (D7),
+  so its top entries are often wrong but still overlap vector's top 20, and the
+  consensus rule promotes them.
+- **Sweep** (`20260926T015909.json`, RRF k in {1, 10, 60} x lexical weight in
+  {1.0, 0.5, 0.25}): weight 1.0 hurts at every k (R@1 0.821 to 0.836). Weight 0.5 or
+  0.25 at any k ties vector-only exactly (R@1 0.918, MRR 0.993; k=60 w=0.5 MRR 0.990).
+  Nothing beats vector-only.
+- **Decision:** the ask endpoint defaults to vector-only (`rag_retrieval_mode`).
+  Hybrid stays available at lexical weight 0.5 because it is measured harmless and
+  because this corpus under-represents the case lexical search exists for: rare exact
+  tokens. The single vector regression is that case (q078, the name "Priya", rank 2).
+  The lexical list also remains the second candidate source for the Phase 4 reranker.
+- **Caveat:** the fusion parameters were chosen on the same 67 questions they are
+  reported on. There is no held-out set yet; the real-photo slice will be the first.
+
+### D20. Overlapping the embedding call with the FTS query: measured as noise, default off
+
+- **Measured** (n=144 each): hybrid with overlap p50 237.4 ms, p95 377 ms; sequential
+  p50 236.0 ms, p95 414 ms. The stage table shows why: FTS is 20 ms p50 while the
+  embedding call is 180 to 200 ms p50 with a p95 of 318 to 338 ms. The most the
+  overlap can save is the FTS time, which is smaller than the embedding call's own
+  run-to-run variance.
+- **Decision:** `overlap=False` by default. The code path stays (six lines and a test)
+  so the ablation is reproducible, but the request path is the simpler one. This is
+  the "async retrieval" item from the plan, kept in reduced form and then measured
+  out.
+
+### D21. Embedding reuse on edit is keyed by chunk content hash
+
+- Re-chunking the unchanged 51-note corpus: 0 API calls, 5.0 s total (vs 47.5 s when
+  every chunk was embedded). A one-section edit to a three-chunk note re-embeds one
+  chunk (tested). Edits that only change HTML styling are skipped entirely.
+
+### D22. Embedding failure never blocks lexical search
+
+- If the embedding call fails, chunk rows are still written with NULL embeddings,
+  lexical search works immediately, vector search skips NULL rows, the note is left
+  un-hashed so the next ingest or `scripts/reindex.py` retries, and the result status
+  is "partial" (tested end to end with an injected failure).
+
+### D23. Abstain signal for Phase 3: the top-1 cosine score, with a thin margin
+
+- **Measured** on the eval user (cached query embeddings): top-1 cosine for answerable
+  questions min 0.622, p25 0.674, median 0.704 (n=67); for the 7 unanswerable
+  questions max 0.649, median 0.632. A threshold of 0.65 lets 0 of 7 unanswerable
+  questions through and blocks 4 of 67 answerable ones; 0.60 lets 6 of 7 through.
+- FTS gives no abstain signal at all: OR semantics matched at least 5 chunks for every
+  unanswerable question.
+- **Decision for Phase 3:** use 0.65 as a soft gate combined with the generator's own
+  "insufficient evidence" flag, and grow the unanswerable set (7 is too few to trust
+  a threshold to two decimals).
+
+### D24. Phase 2 code is not deployable until migration 0003 runs in production
+
+- The ORM now selects `note_chunks.embedding`. Production is at revision 0002. A
+  lexical-only backfill attempted on 2026-09-25 failed on exactly this and wrote
+  nothing. Deploying the Phase 2 Lambda before 0003 would make every chunk read fail
+  (uploads would still succeed because ingestion is wrapped, but nothing would be
+  indexed). 0003 waits for a new Neon rollback branch per the migration rule.
+
+### Phase 3 targets
+
+q078 (rare token, vector rank 2) and q060 (multi-note, rank 2) are the only
+below-rank-1 questions under vector-only. Injection questions retrieve their plant by
+design; the Phase 3 guard and generator are measured on whether the answer complies.
+Unanswerable set grows from 7 toward 20 before the abstain threshold is trusted.

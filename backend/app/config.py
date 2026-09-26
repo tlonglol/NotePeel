@@ -45,6 +45,19 @@ class Settings(BaseSettings):
     cf_account_id: str = ""
     cf_api_token: str = ""
 
+    # Retrieval ("ask your notes"). Embeddings come from Gemini (same key as OCR).
+    # 768 dims via Matryoshka truncation of gemini-embedding-001; see DECISIONS.md.
+    rag_embedding_model: str = "gemini-embedding-001"
+    rag_embedding_dims: int = 768
+    rag_embed_on_ingest: bool = True     # set false to index lexically only (no API calls)
+    # Retrieval mode the ask endpoint uses: "vector" (default, measured best on the
+    # eval corpus) or "hybrid" (RRF of FTS + vector). Hybrid's lexical weight of 0.5
+    # is the value at which it ties vector-only; 1.0 measurably hurt. See DECISIONS.md.
+    rag_retrieval_mode: str = "vector"
+    rag_hybrid_fts_weight: float = 0.5
+    rag_rrf_k: int = 60
+    rag_candidates: int = 20
+
     class Config:
         env_file = ".env"
 

@@ -49,3 +49,6 @@ backend/eval/corpus/real/*.jpeg
 backend/eval/corpus/real/*.png
 backend/eval/corpus/real/*.heic
 backend/eval/corpus/real/*.webp
+
+# Eval query-embedding cache (regenerable)
+backend/eval/.cache/

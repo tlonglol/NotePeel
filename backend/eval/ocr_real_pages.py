@@ -39,7 +39,10 @@ def group_pages(paths):
         stem = re.sub(r"_p\d+$", "", p.stem)
         groups[stem].append(p)
     for stem in groups:
-        groups[stem].sort(key=lambda p: int(re.search(r"_p(\d+)$", p.stem).group(1)) if re.search(r"_p(\d+)$", p.stem) else 0)
+        def page_no(p):
+            m = re.search(r"_p(\d+)$", p.stem)
+            return int(m.group(1)) if m else 0
+        groups[stem].sort(key=page_no)
     return groups
 
 

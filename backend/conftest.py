@@ -15,6 +15,9 @@ os.environ.setdefault("CF_ACCOUNT_ID", "test")
 os.environ.setdefault("CF_API_TOKEN", "test")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
+# Never call the embedding API from tests by default; tests that exercise
+# embeddings pass embed=True explicitly and patch the embedder.
+os.environ.setdefault("RAG_EMBED_ON_INGEST", "false")
 
 # Your existing fixture
 @pytest.fixture(scope="session")

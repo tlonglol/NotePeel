@@ -7,7 +7,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import relationship
 
+from app.config import get_settings
 from app.database import Base
+from app.rag.vector_type import Vector
 
 
 class NoteChunk(Base):
@@ -37,6 +39,11 @@ class NoteChunk(Base):
         TSVECTOR,
         Computed("to_tsvector('english', coalesce(context, '') || ' ' || text)", persisted=True),
     )
+
+    # Dense embedding of `context + text`. NULL until embedded; vector search
+    # skips NULLs, so lexical search keeps working if the embedding API is down.
+    embedding = Column(Vector(get_settings().rag_embedding_dims), nullable=True)
+    embedding_model = Column(String(100), nullable=True)   # e.g. "gemini-embedding-001@768"
 
     created_at = Column(DateTime, default=datetime.utcnow)
 

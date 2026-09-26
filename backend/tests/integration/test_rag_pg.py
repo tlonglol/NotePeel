@@ -57,7 +57,7 @@ class TestIngest:
         db.commit()
         r = ingest_note(db, n)
         assert r.status == "indexed" and r.chunks == 3
-        assert r.reused_embeddings == 2   # two chunks' text unchanged -> their hashes were reusable
+        assert r.reused_embeddings == 0   # nothing embedded yet, so nothing to reuse (see test_vector_pg)
         assert db.query(NoteChunk).filter(NoteChunk.note_id == n.id).count() == 3
 
     def test_title_change_updates_context(self, db, user):

@@ -39,7 +39,8 @@ from app.controllers.auth_controller import AuthController
 from app.models import Note, NoteChunk, ProcessingStatus, User
 from app.rag.chunker import ChunkConfig, estimate_tokens
 from app.rag.ingest import reindex_user
-from app.rag.retrieval import RetrievedChunk, fts_search, ilike_note_search, note_order
+from app.rag.embeddings import embed_query, model_tag
+from app.rag.retrieval import RetrievedChunk, fts_search, hybrid_search, ilike_note_search, note_order, vector_search
 from eval.corpus import CorpusNote, QAItem, load_notes, load_qa, norm, validate
 from eval.metrics import bootstrap_ci, coverage_at_k, mean, percentile, reciprocal_rank
 
@@ -52,7 +53,29 @@ MODES: Dict[str, str] = {
     "ilike": "legacy substring search over whole notes, ordered by recency (what the app shipped with)",
     "fts_and": "Postgres FTS over chunks, websearch_to_tsquery (all terms required)",
     "fts_or": "Postgres FTS over chunks, OR of stemmed terms, ts_rank_cd",
+    "vector": "pgvector exact cosine scan over chunk embeddings (Gemini, 768-d)",
+    "hybrid": "RRF of fts_or and vector (top-20 each, k=60); embedding call overlapped with FTS",
+    "hybrid_seq": "same as hybrid but embedding call and FTS run sequentially (latency ablation)",
 }
+CACHE_DIR = Path(__file__).resolve().parent / ".cache"
+
+
+class QueryEmbeddingCache:
+    """Question -> embedding, on disk, keyed by model tag. Used for the accuracy
+    pass so re-runs are free and deterministic. The latency pass bypasses it."""
+
+    def __init__(self) -> None:
+        CACHE_DIR.mkdir(exist_ok=True)
+        self.path = CACHE_DIR / f"qemb_{model_tag().replace('@', '_')}.json"
+        self.data: Dict[str, List[float]] = json.loads(self.path.read_text()) if self.path.exists() else {}
+        self.misses = 0
+
+    def get(self, question: str) -> List[float]:
+        if question not in self.data:
+            self.data[question] = embed_query(question)
+            self.misses += 1
+            self.path.write_text(json.dumps(self.data))
+        return self.data[question]
 
 
 # ── setup ───────────────────────────────────────────────────────────────────
@@ -149,27 +172,67 @@ def chunk_stats(db: Session, user_id: int) -> dict:
 
 # ── one mode ────────────────────────────────────────────────────────────────
 
-def make_retriever(mode: str, db: Session, user_id: int) -> Callable[[str], tuple]:
-    """Return fn(question) -> (chunks or None, ranked_note_ids)."""
+def make_retriever(mode: str, db: Session, user_id: int, cache: QueryEmbeddingCache,
+                   stages: List[dict], rrf_k: int, candidates: int,
+                   fts_weight: float = 1.0) -> Callable[[str, bool], tuple]:
+    """Return fn(question, live) -> (chunks or None, ranked_note_ids).
+    live=False may use the query-embedding cache; live=True always calls the API
+    and appends per-stage timings to `stages`."""
     if mode == "ilike":
-        return lambda q: (None, ilike_note_search(db, user_id, q))
-    if mode == "fts_and":
-        def f(q):
-            ch = fts_search(db, user_id, q, k=K_MAX, mode="and")
+        return lambda q, live: (None, ilike_note_search(db, user_id, q))
+    if mode in ("fts_and", "fts_or"):
+        fmode = "and" if mode == "fts_and" else "or"
+
+        def f(q, live):
+            ch = fts_search(db, user_id, q, k=K_MAX, mode=fmode)
             return ch, note_order(ch)
         return f
-    if mode == "fts_or":
-        def f(q):
-            ch = fts_search(db, user_id, q, k=K_MAX, mode="or")
+    if mode == "vector":
+        def f(q, live):
+            if live:
+                t = time.perf_counter()
+                v = embed_query(q)
+                embed_ms = (time.perf_counter() - t) * 1000
+                t = time.perf_counter()
+                ch = vector_search(db, user_id, v, k=K_MAX)
+                stages.append({"embed_ms": embed_ms, "vector_ms": (time.perf_counter() - t) * 1000})
+            else:
+                ch = vector_search(db, user_id, cache.get(q), k=K_MAX)
+            return ch, note_order(ch)
+        return f
+    if mode in ("hybrid", "hybrid_seq"):
+        overlap = mode == "hybrid"
+
+        def f(q, live):
+            timings: Dict[str, float] = {}
+            ch = hybrid_search(db, user_id, q, k=K_MAX, candidates=candidates, rrf_k=rrf_k,
+                               overlap=overlap, query_vec=None if live else cache.get(q), timings=timings,
+                               fts_weight=fts_weight)
+            if live:
+                stages.append(timings)
             return ch, note_order(ch)
         return f
     raise ValueError(f"unknown mode {mode}")
 
 
+LIVE_MODES = ("vector", "hybrid", "hybrid_seq")
+
+
 def run_mode(db: Session, user_id: int, mode: str, qa: List[QAItem],
-             slug_to_id: Dict[str, int], repeats: int) -> dict:
-    retrieve = make_retriever(mode, db, user_id)
+             slug_to_id: Dict[str, int], repeats: int, cache: QueryEmbeddingCache,
+             rrf_k: int = 60, candidates: int = 20, live_repeats: int = 2, live_rpm: int = 90,
+             fts_weight: float = 1.0) -> dict:
+    stages: List[dict] = []
+    retrieve = make_retriever(mode, db, user_id, cache, stages, rrf_k, candidates, fts_weight)
     answerable = [q for q in qa if q.answerable]
+    live = mode in LIVE_MODES
+    if live:
+        repeats = live_repeats
+    # Live modes call the embedding API per query. The free tier allows 100
+    # requests/min, and a throttled call would record the throttle wait as
+    # latency, so live calls are paced below the limit (the pause is outside
+    # the timed region).
+    pace_s = 60.0 / live_rpm if live else 0.0
 
     def chunk_covers(c: RetrievedChunk, ev) -> bool:
         return c.note_id == slug_to_id[ev.note] and norm(ev.span) in norm(c.text)
@@ -180,7 +243,7 @@ def run_mode(db: Session, user_id: int, mode: str, qa: List[QAItem],
     per_q: List[dict] = []
     latencies: List[float] = []
     for q in answerable:
-        chunks, ranked_notes = retrieve(q.question)
+        chunks, ranked_notes = retrieve(q.question, False)
         rec = {"id": q.id, "type": q.type, "tags": q.tags}
         if chunks is not None:
             rec["chunk_r1"] = coverage_at_k(chunks, q.evidence, 1, chunk_covers)
@@ -195,8 +258,10 @@ def run_mode(db: Session, user_id: int, mode: str, qa: List[QAItem],
         per_q.append(rec)
 
         for _ in range(repeats):
+            if pace_s:
+                time.sleep(pace_s)
             t0 = time.perf_counter()
-            retrieve(q.question)
+            retrieve(q.question, True)
             latencies.append((time.perf_counter() - t0) * 1000)
 
     def agg(key: str, subset: Optional[List[dict]] = None) -> Optional[dict]:
@@ -222,11 +287,17 @@ def run_mode(db: Session, user_id: int, mode: str, qa: List[QAItem],
         "by_type": by_type,
         "latency_ms": {
             "n": len(latencies),
-            "p50": round(percentile(latencies, 50), 2),
-            "p95": round(percentile(latencies, 95), 2),
-            "p99": round(percentile(latencies, 99), 2),
+            "p50": round(percentile(latencies, 50), 2) if latencies else None,
+            "p95": round(percentile(latencies, 95), 2) if latencies else None,
+            "p99": round(percentile(latencies, 99), 2) if latencies else None,
             "repeats": repeats,
         },
+        "fusion": {"rrf_k": rrf_k, "candidates": candidates, "fts_weight": fts_weight} if mode.startswith("hybrid") else None,
+        "stage_ms": {
+            key: {"p50": round(percentile(vals, 50), 1), "p95": round(percentile(vals, 95), 1), "n": len(vals)}
+            for key in sorted({k for st in stages for k in st})
+            for vals in [[st[key] for st in stages if key in st]]
+        } if stages else {},
         "questions": per_q,
     }
 
@@ -256,7 +327,8 @@ def markdown_table(runs: List[dict]) -> str:
             f"| {r['mode']} | {r['granularity']} | {fmt(s['chunk_r1'])} | {fmt(s['chunk_r5'])} | "
             f"{fmt(s['chunk_mrr10'])} | {fmt(s['note_r5'])} | {fmt(s['note_mrr10'])} | "
             f"{fmt_tokens(s['ctx_tokens_top5'])} | "
-            f"{lat['p50']} | {lat['p95']} | {lat['p99']} | {lat['n']} |"
+            f"{lat['p50'] if lat['p50'] is not None else '-'} | {lat['p95'] if lat['p95'] is not None else '-'} | "
+            f"{lat['p99'] if lat['p99'] is not None else '-'} | {lat['n']} |"
         )
     return "\n".join(lines)
 
@@ -267,6 +339,23 @@ def by_type_table(runs: List[dict]) -> str:
         for t, cells in r["by_type"].items():
             lines.append(f"| {r['mode']} | {r['granularity']} | {t} | {fmt(cells['chunk_r5'])} | "
                          f"{fmt(cells['note_r5'])} | {fmt(cells['chunk_mrr10'])} |")
+    return "\n".join(lines)
+
+
+def stage_table(runs: List[dict]) -> str:
+    rows = [r for r in runs if r.get("stage_ms")]
+    if not rows:
+        return ""
+    keys = ["embed_ms", "fts_ms", "vector_ms", "fuse_ms", "total_ms"]
+    lines = ["| mode | chunking | " + " | ".join(f"{k} p50 / p95" for k in keys) + " | n |",
+             "|---|---|" + "---|" * (len(keys) + 1)]
+    for r in rows:
+        cells = []
+        for k in keys:
+            c = r["stage_ms"].get(k)
+            cells.append(f"{c['p50']} / {c['p95']}" if c else "-")
+        n = next(iter(r["stage_ms"].values()))["n"]
+        lines.append(f"| {r['mode']} | {r['granularity']} | " + " | ".join(cells) + f" | {n} |")
     return "\n".join(lines)
 
 
@@ -283,13 +372,22 @@ def chunk_table(stats: Dict[str, dict]) -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--modes", default="ilike,fts_and,fts_or")
+    ap.add_argument("--modes", default="ilike,fts_or,vector,hybrid")
     ap.add_argument("--chunking", default="window",
                     help="comma list of chunk specs: window | section | note | window:60:100 (gran:target:max)")
     ap.add_argument("--repeats", type=int, default=5, help="latency repeats per question")
     ap.add_argument("--no-real", action="store_true", help="exclude eval/corpus/real/*.json")
     ap.add_argument("--out", default=str(RESULTS_DIR))
     ap.add_argument("--label", default="", help="free-text label stored in the results file")
+    ap.add_argument("--rrf-k", type=int, default=60)
+    ap.add_argument("--candidates", type=int, default=20, help="per-source candidate depth before fusion")
+    ap.add_argument("--no-embed", action="store_true", help="index lexically only (no embedding API calls)")
+    ap.add_argument("--live-repeats", type=int, default=2,
+                    help="latency repeats for modes that call the embedding API per query")
+    ap.add_argument("--live-rpm", type=int, default=90, help="pacing for live embedding calls (free tier: 100/min)")
+    ap.add_argument("--fts-weight", default="1.0",
+                    help="comma list of lexical RRF weights to sweep for hybrid modes (vector weight is 1.0)")
+    ap.add_argument("--rrf-ks", default=None, help="comma list of RRF k values to sweep (overrides --rrf-k)")
     args = ap.parse_args(argv)
 
     notes = load_notes(include_real=not args.no_real, include_adversarial=True)
@@ -309,21 +407,40 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
     specs = [g.strip() for g in args.chunking.split(",") if g.strip()]
+    need_embed = (not args.no_embed) and any(m in ("vector", "hybrid", "hybrid_seq") for m in modes)
+    cache = QueryEmbeddingCache() if need_embed else None
     runs: List[dict] = []
     stats: Dict[str, dict] = {}
     for spec in specs:
         cfg = parse_chunk_spec(spec)
-        reindex_user(db, user.id, cfg=cfg, force=True)
+        t0 = time.perf_counter()
+        results = reindex_user(db, user.id, cfg=cfg, force=True, embed=need_embed)
         stats[spec] = chunk_stats(db, user.id)
         stats[spec]["config"] = cfg.signature()
+        stats[spec]["ingest"] = {
+            "total_ms": round((time.perf_counter() - t0) * 1000),
+            "embedded": sum(r.embedded for r in results),
+            "reused_embeddings": sum(r.reused_embeddings for r in results),
+            "embedding_ms_total": round(sum(r.embedding_ms for r in results)),
+            "statuses": {st: sum(1 for r in results if r.status == st) for st in {r.status for r in results}},
+        }
+        print(f"indexed {spec}: {stats[spec]['ingest']}", file=sys.stderr)
+        rrf_ks = [int(x) for x in args.rrf_ks.split(",")] if args.rrf_ks else [args.rrf_k]
+        fts_weights = [float(x) for x in args.fts_weight.split(",")]
         for m in modes:
             if m == "ilike" and spec != specs[0]:
                 continue  # ILIKE ignores chunks; run it once
-            r = run_mode(db, user.id, m, qa, slug_to_id, args.repeats)
-            r["granularity"] = spec if m != "ilike" else "n/a"
-            r["chunk_config"] = cfg.signature()
-            runs.append(r)
-            print(f"done {m} / {spec}", file=sys.stderr)
+            grid = [(kk, w) for kk in rrf_ks for w in fts_weights] if m.startswith("hybrid") else [(args.rrf_k, 1.0)]
+            for kk, w in grid:
+                r = run_mode(db, user.id, m, qa, slug_to_id, args.repeats, cache,
+                             rrf_k=kk, candidates=args.candidates,
+                             live_repeats=args.live_repeats, live_rpm=args.live_rpm, fts_weight=w)
+                label = m if not m.startswith("hybrid") or len(grid) == 1 else f"{m}(k={kk},w={w})"
+                r["mode"] = label
+                r["granularity"] = spec if m != "ilike" else "n/a"
+                r["chunk_config"] = cfg.signature()
+                runs.append(r)
+                print(f"done {label} / {spec}", file=sys.stderr)
 
     counts = {
         "notes_total": len(notes),
@@ -338,6 +455,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         "label": args.label,
         "db_kind": db_kind(url),
         "corpus": counts,
+        "embedding_model": model_tag() if need_embed else None,
+        "rrf_k": args.rrf_k,
+        "candidates": args.candidates,
+        "query_embedding_cache_misses": cache.misses if cache else 0,
         "chunk_stats": stats,
         "runs": runs,
     }
@@ -351,6 +472,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"db: {out['db_kind']}   results: {path}\n")
     print(chunk_table(stats), "\n")
     print(markdown_table(runs), "\n")
+    st = stage_table(runs)
+    if st:
+        print(st, "\n")
     print(by_type_table(runs))
     return 0
 
