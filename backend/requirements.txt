@@ -10,7 +10,10 @@ mangum>=0.17.0
 python-dotenv==1.0.1
 
 # Database
-sqlalchemy>=2.0.0
+sqlalchemy>=2.0.0,<2.1.0  # 2.1 changed the default postgres driver for a bare
+                          # postgresql:// DSN from psycopg2 to psycopg (v3); we only
+                          # bundle psycopg2-binary. Broke prod 2026-09-27 (DECISIONS D38)
+                          # before this pin -- verify psycopg2 still works if bumping.
 psycopg2-binary>=2.9.9
 
 # Authentication

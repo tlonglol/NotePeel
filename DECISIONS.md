@@ -675,3 +675,44 @@ free on this plan. In-region numbers come from the query log (`scripts/rag_stats
   5-question injection slice against Gemini directly (well inside the 20/day budget)
   is the cheapest remaining item to close it. Held for later per the owner's explicit
   instruction to conserve Gemini quota this session.
+
+### D38. Production incident: an unpinned SQLAlchemy upper bound broke the first deploy
+
+- **What happened:** deploying Phase 3 (2026-09-27) returned 502 on every request.
+  CloudWatch showed `Runtime.ImportModuleError: ... No module named 'psycopg'` on
+  every cold start -- not `psycopg2` (the driver this project has used from the
+  start and the only one bundled), but `psycopg` (psycopg3), which nothing in the
+  codebase imports directly.
+- **Root cause, reproduced in isolation before touching prod again:** `requirements.txt`
+  pinned `sqlalchemy>=2.0.0` with no upper bound. The local dev venv had 2.0.34 cached
+  from earlier in the project, so all 209 tests and every CI run to date exercised
+  that version. `backend/build.sh` runs a fresh, unpinned `pip install` for every
+  Lambda package, and this time it resolved 2.1.1 -- which changed the default
+  dialect for a bare `postgresql://` DSN (used everywhere: local `.env`, Neon prod
+  URLs, all of them driver-less) from `psycopg2` to `psycopg` (v3). Reproduced the
+  exact failure in a clean `pip install --target` directory with only
+  `sqlalchemy==2.1.1` and nothing else: `create_engine("postgresql://...")` raised
+  `ModuleNotFoundError: No module named 'psycopg'` immediately, byte-for-byte
+  matching the CloudWatch error, before I touched the real build again.
+- **Fix:** pinned `sqlalchemy>=2.0.0,<2.1.0`. Verified the fix the same way: the pinned
+  range resolves to 2.0.54, whose bare-DSN default is back to `psycopg2`, and engine
+  creation succeeds once `psycopg2-binary` is present (also verified in isolation).
+  Rebuilt the Lambda package, redeployed, and confirmed live: root endpoint 200,
+  `/api/ai/ask` answered an answerable and an unanswerable question correctly, and
+  both landed in `rag_queries` in production with no error.
+- **Why local tests never caught this:** the test suite runs against whatever
+  SQLAlchemy is already installed in the dev venv (2.0.34, installed once early in
+  the project and never re-resolved), while `build.sh` re-resolves every dependency
+  from scratch on every build. Two different install paths asking pip to satisfy the
+  same unbounded constraint (`>=2.0.0`) can and did answer differently on different
+  days. `requirements-dev.txt` (used by CI and by every test run in this project)
+  does `-r requirements.txt`, so it inherited the same unbounded pin -- the next
+  fresh CI run would have hit this too, not just the Lambda build. The fix closes
+  both paths at once.
+- **Lesson:** an unbounded lower-bound pin (`>=X`) on a library your code depends on
+  for *default behavior*, not just an API surface, is a live production risk every
+  time the build re-resolves dependencies, which for this project's `build.sh` is
+  every single deploy. The other unpinned packages in `requirements.txt`
+  (`fastapi`, `pydantic`, `boto3`, etc.) carry the same latent risk; this incident
+  is the reason to eventually audit and pin the rest, not proof that this was the
+  only one waiting.
