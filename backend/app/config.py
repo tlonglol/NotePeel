@@ -58,6 +58,19 @@ class Settings(BaseSettings):
     rag_rrf_k: int = 60
     rag_candidates: int = 20
 
+    # Grounded generation. Both Gemini models are capped at 20 generate_content
+    # requests PER DAY PER MODEL on the free tier (measured 2026-09-26, DECISIONS.md
+    # D32) -- flash is not a fix for flash-lite's cap, it has the identical cap under
+    # a different counter. Since billing is off (owner's choice, D37), the app runs a
+    # fallback chain instead: try Gemini first (better citations, JSON-enforced), and
+    # on a quota/429 error fall back to the unthrottled Workers AI Llama model.
+    rag_generation_model: str = "gemini-2.5-flash"
+    rag_fallback_model: str = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+    rag_context_chunks: int = 5           # chunks handed to the generator
+    rag_abstain_threshold: float = 0.65   # top-1 cosine below this = weak evidence (DECISIONS D26)
+    rag_max_answer_tokens: int = 600
+    rag_streaming_enabled: bool = False   # SSE endpoint; real streaming on Lambda needs the Web Adapter
+
     class Config:
         env_file = ".env"
 

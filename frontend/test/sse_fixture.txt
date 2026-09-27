@@ -1,0 +1,18 @@
+event: sources
+data: {"sources": [{"n": 1, "chunk_id": 9, "note_id": 3, "note_title": "Photosynthesis", "page": 1, "heading": "Calvin Cycle", "snippet": "Occurs in the stroma"}], "retrieval_mode": "vector", "top_score": 0.71, "gate_triggered": false, "guard_flagged_chunk_ids": [], "timings_ms": {"embed_ms": 201.4}}
+
+event: token
+data: {"text": "Rubisco "}
+
+event: token
+data: {"text": "fixes CO2 onto RuBP "}
+
+event: token
+data: {"text": "in the stroma [1]."}
+
+event: token
+data: {"text": "Multi\nline and \"quoted\" and émoji 🐵 text"}
+
+event: done
+data: {"answer": "Rubisco fixes CO2 onto RuBP in the stroma [1].", "abstained": false, "citations": [{"n": 1, "chunk_id": 9, "note_id": 3, "note_title": "Photosynthesis", "page": 1, "heading": "Calvin Cycle", "snippet": "Occurs in the stroma"}], "timings_ms": {"total_ms": 812.3}, "query_id": 41, "model": "gemini-2.5-flash"}
+

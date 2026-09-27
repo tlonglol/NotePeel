@@ -67,3 +67,20 @@ variable "cf_api_token" {
   type      = string
   sensitive = true
 }
+
+variable "streaming_enabled" {
+  type        = bool
+  default     = false
+  description = <<-EOT
+    Serve the API through the Lambda Web Adapter with a RESPONSE_STREAM Function
+    URL so the ask-your-notes SSE endpoint streams tokens. Off = Mangum (buffered).
+    Mangum cannot stream and the Python managed runtime has no native streaming,
+    so this swaps the handler for run.sh (uvicorn) plus the adapter layer.
+  EOT
+}
+
+variable "lwa_layer_version" {
+  type        = number
+  default     = 24
+  description = "Version of the public LambdaAdapterLayerX86 layer (account 753240598075)."
+}

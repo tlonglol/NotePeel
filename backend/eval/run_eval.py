@@ -221,7 +221,8 @@ LIVE_MODES = ("vector", "hybrid", "hybrid_seq")
 def run_mode(db: Session, user_id: int, mode: str, qa: List[QAItem],
              slug_to_id: Dict[str, int], repeats: int, cache: QueryEmbeddingCache,
              rrf_k: int = 60, candidates: int = 20, live_repeats: int = 2, live_rpm: int = 90,
-             fts_weight: float = 1.0) -> dict:
+             fts_weight: float = 1.0, real_slugs: Optional[set] = None) -> dict:
+    real_slugs = real_slugs or set()
     stages: List[dict] = []
     retrieve = make_retriever(mode, db, user_id, cache, stages, rrf_k, candidates, fts_weight)
     answerable = [q for q in qa if q.answerable]
@@ -244,13 +245,19 @@ def run_mode(db: Session, user_id: int, mode: str, qa: List[QAItem],
     latencies: List[float] = []
     for q in answerable:
         chunks, ranked_notes = retrieve(q.question, False)
-        rec = {"id": q.id, "type": q.type, "tags": q.tags}
+        tags = list(q.tags) + ([] if any(t.startswith("hard-") for t in q.tags) else ["v1"])
+        rec = {"id": q.id, "type": q.type, "tags": tags,
+               "source": "real" if any(n in real_slugs for n in q.notes) else "synthetic"}
         if chunks is not None:
             rec["chunk_r1"] = coverage_at_k(chunks, q.evidence, 1, chunk_covers)
             rec["chunk_r5"] = coverage_at_k(chunks, q.evidence, 5, chunk_covers)
             rec["chunk_mrr10"] = reciprocal_rank(chunks, q.evidence, 10, chunk_covers)
             rec["top5_chunks"] = [(c.chunk_id, c.note_id, round(c.score, 4)) for c in chunks[:5]]
             rec["ctx_tokens_top5"] = sum(estimate_tokens(c.text) for c in chunks[:5])
+            # precision@5 at note level: share of the top-5 chunks that come from an
+            # expected note. Stays informative after recall saturates at 1.0.
+            exp_ids = {slug_to_id[s] for s in q.notes}
+            rec["note_p5"] = (sum(1 for c in chunks[:5] if c.note_id in exp_ids) / len(chunks[:5])) if chunks else 0.0
         rec["note_r5"] = coverage_at_k(ranked_notes, q.notes, 5, note_covers)
         rec["note_mrr10"] = reciprocal_rank(ranked_notes, q.notes, 10, note_covers)
         rec["top5_notes"] = ranked_notes[:5]
@@ -273,18 +280,31 @@ def run_mode(db: Session, user_id: int, mode: str, qa: List[QAItem],
         return {"mean": round(mean(vals), 4), "n": len(vals),
                 "ci95": [round(ci[0], 4), round(ci[1], 4)] if ci else None}
 
-    headline_rows = [r for r in per_q if r["type"] in ("single", "multi")]
+    headline_rows = [r for r in per_q if r["type"] in ("single", "multi") and r["source"] == "synthetic"]
     summary = {k: agg(k, headline_rows)
-               for k in ("chunk_r1", "chunk_r5", "chunk_mrr10", "note_r5", "note_mrr10", "ctx_tokens_top5")}
+               for k in ("chunk_r1", "chunk_r5", "chunk_mrr10", "note_r5", "note_mrr10", "note_p5", "ctx_tokens_top5")}
     by_type = {
         t: {k: agg(k, [r for r in per_q if r["type"] == t]) for k in ("chunk_r5", "note_r5", "chunk_mrr10")}
         for t in sorted({r["type"] for r in per_q})
+    }
+    by_tag = {
+        t: {k: agg(k, [r for r in per_q if t in r["tags"]]) for k in ("chunk_r1", "chunk_r5", "chunk_mrr10")}
+        for t in sorted({t for r in per_q for t in r["tags"]})
+    }
+    # Held-out reporting: questions whose expected notes are real photographed pages
+    # are scored separately from the synthetic corpus (headline excludes real).
+    by_source = {
+        src: {k: agg(k, [r for r in headline_rows if r["source"] == src])
+              for k in ("chunk_r1", "chunk_r5", "chunk_mrr10", "note_r5")}
+        for src in sorted({r["source"] for r in headline_rows})
     }
     return {
         "mode": mode,
         "description": MODES[mode],
         "summary": summary,
         "by_type": by_type,
+        "by_tag": by_tag,
+        "by_source": by_source,
         "latency_ms": {
             "n": len(latencies),
             "p50": round(percentile(latencies, 50), 2) if latencies else None,
@@ -317,15 +337,15 @@ def fmt_tokens(cell: Optional[dict]) -> str:
 
 def markdown_table(runs: List[dict]) -> str:
     lines = [
-        "| mode | chunking | chunk R@1 | chunk R@5 [95% CI] | chunk MRR@10 | note R@5 | note MRR@10 "
+        "| mode | chunking | chunk R@1 | chunk R@5 [95% CI] | chunk MRR@10 | note R@5 | note MRR@10 | note P@5 "
         "| ctx tokens@5 | p50 ms | p95 ms | p99 ms | latency n |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in runs:
         s, lat = r["summary"], r["latency_ms"]
         lines.append(
             f"| {r['mode']} | {r['granularity']} | {fmt(s['chunk_r1'])} | {fmt(s['chunk_r5'])} | "
-            f"{fmt(s['chunk_mrr10'])} | {fmt(s['note_r5'])} | {fmt(s['note_mrr10'])} | "
+            f"{fmt(s['chunk_mrr10'])} | {fmt(s['note_r5'])} | {fmt(s['note_mrr10'])} | {fmt(s.get('note_p5'))} | "
             f"{fmt_tokens(s['ctx_tokens_top5'])} | "
             f"{lat['p50'] if lat['p50'] is not None else '-'} | {lat['p95'] if lat['p95'] is not None else '-'} | "
             f"{lat['p99'] if lat['p99'] is not None else '-'} | {lat['n']} |"
@@ -356,6 +376,34 @@ def stage_table(runs: List[dict]) -> str:
             cells.append(f"{c['p50']} / {c['p95']}" if c else "-")
         n = next(iter(r["stage_ms"].values()))["n"]
         lines.append(f"| {r['mode']} | {r['granularity']} | " + " | ".join(cells) + f" | {n} |")
+    return "\n".join(lines)
+
+
+def by_tag_table(runs: List[dict]) -> str:
+    tags = sorted({t for r in runs for t in r.get("by_tag", {})})
+    if not tags:
+        return ""
+    lines = ["| mode | chunking | tag | chunk R@1 | chunk R@5 | chunk MRR@10 |", "|---|---|---|---|---|---|"]
+    for r in runs:
+        for t in tags:
+            cells = r.get("by_tag", {}).get(t)
+            if not cells or not cells.get("chunk_r1"):
+                continue
+            lines.append(f"| {r['mode']} | {r['granularity']} | {t} | {fmt(cells['chunk_r1'])} | "
+                         f"{fmt(cells['chunk_r5'])} | {fmt(cells['chunk_mrr10'])} |")
+    return "\n".join(lines)
+
+
+def by_source_table(runs: List[dict]) -> str:
+    if not any("real" in r.get("by_source", {}) for r in runs):
+        return ""
+    lines = ["| mode | chunking | slice | chunk R@1 | chunk R@5 | chunk MRR@10 | note R@5 |", "|---|---|---|---|---|---|---|"]
+    for r in runs:
+        for src, cells in r.get("by_source", {}).items():
+            if not cells.get("chunk_r1"):
+                continue
+            lines.append(f"| {r['mode']} | {r['granularity']} | {src} | {fmt(cells['chunk_r1'])} | "
+                         f"{fmt(cells['chunk_r5'])} | {fmt(cells['chunk_mrr10'])} | {fmt(cells['note_r5'])} |")
     return "\n".join(lines)
 
 
@@ -434,7 +482,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             for kk, w in grid:
                 r = run_mode(db, user.id, m, qa, slug_to_id, args.repeats, cache,
                              rrf_k=kk, candidates=args.candidates,
-                             live_repeats=args.live_repeats, live_rpm=args.live_rpm, fts_weight=w)
+                             live_repeats=args.live_repeats, live_rpm=args.live_rpm, fts_weight=w,
+                             real_slugs={n.slug for n in notes if n.source == "real"})
                 label = m if not m.startswith("hybrid") or len(grid) == 1 else f"{m}(k={kk},w={w})"
                 r["mode"] = label
                 r["granularity"] = spec if m != "ilike" else "n/a"
@@ -475,7 +524,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     st = stage_table(runs)
     if st:
         print(st, "\n")
-    print(by_type_table(runs))
+    print(by_type_table(runs), "\n")
+    bt = by_tag_table(runs)
+    if bt:
+        print(bt, "\n")
+    bs = by_source_table(runs)
+    if bs:
+        print("held-out real-photo slice (excluded from headline numbers):")
+        print(bs)
     return 0
 
 

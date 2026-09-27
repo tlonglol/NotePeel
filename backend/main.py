@@ -72,6 +72,15 @@ async def ocr(
     return structured_data
 
 
+@app.post("/events")
+def lwa_events(payload: dict | None = None):
+    """Non-HTTP Lambda events under the Lambda Web Adapter (streaming deploys) are
+    forwarded here; the EventBridge keep-warm ping is the only one we expect."""
+    if isinstance(payload, dict) and payload.get("warmer"):
+        return {"warmed": True}
+    return {"ignored": True}
+
+
 @app.get("/")
 def root():
     """Root endpoint."""

@@ -105,3 +105,35 @@ export interface NotebookUpdate {
   name?: string;
   color?: string;
 }
+
+// Ask-your-notes (retrieval-grounded Q&A)
+export interface AskCitation {
+  n: number;
+  chunk_id: number;
+  note_id: number;
+  note_title: string;
+  page: number;
+  heading: string | null;
+  snippet: string;
+}
+
+export interface AskResult {
+  question: string;
+  answer: string;
+  abstained: boolean;
+  gate_triggered: boolean;
+  citations: AskCitation[];
+  sources: AskCitation[];
+  retrieval_mode: string;
+  top_score: number | null;
+  guard_flagged_chunk_ids: number[];
+  model: string | null;
+  timings_ms: Record<string, number>;
+  query_id: number | null;
+}
+
+export interface AskConfig {
+  retrieval_mode: string;
+  generation_model: string;
+  streaming: boolean;
+}

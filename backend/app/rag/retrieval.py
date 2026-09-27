@@ -184,6 +184,7 @@ def hybrid_search(
     query_vec: Optional[Sequence[float]] = None,
     timings: Optional[Dict[str, float]] = None,
     fts_weight: float = 1.0,
+    lists_out: Optional[Dict[str, List[RetrievedChunk]]] = None,
 ) -> List[RetrievedChunk]:
     """FTS top-`candidates` and vector top-`candidates`, fused by RRF, top-k.
 
@@ -229,6 +230,9 @@ def hybrid_search(
     t = time.perf_counter()
     fused = rrf_fuse([fts, vec], k=rrf_k, weights=[fts_weight, 1.0], limit=k)
     fuse_ms = (time.perf_counter() - t) * 1000
+    if lists_out is not None:
+        lists_out["fts"] = fts
+        lists_out["vector"] = vec
 
     if timings is not None:
         timings.update(embed_ms=embed_ms, fts_ms=fts_ms, vector_ms=vector_ms, fuse_ms=fuse_ms,

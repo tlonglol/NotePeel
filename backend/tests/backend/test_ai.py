@@ -123,6 +123,17 @@ class TestCallFunction:
             assert parsed[0]["question"] == "Q1"
 
     @pytest.mark.asyncio
+    async def test_call_handles_dict_response(self):
+        """Workers AI returns an already-parsed object for some JSON prompts."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"success": True, "result": {"response": {"claims_total": 3}}}
+        with patch("app.services.workers_ai.httpx.AsyncClient") as mock_client:
+            mock_client.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
+            from app.services.workers_ai import _call
+            result = await _call("system", "user")
+            assert isinstance(result, str) and json.loads(result) == {"claims_total": 3}
+
+    @pytest.mark.asyncio
     async def test_call_raises_on_api_error(self):
         mock_response = MagicMock()
         mock_response.json.return_value = {"success": False, "errors": [{"message": "Invalid token"}]}

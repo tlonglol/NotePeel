@@ -4,3 +4,4 @@ from app.models.note import Note, ProcessingStatus
 from app.models.notebook import Notebook, note_notebooks
 from app.models.flashcard import FlashcardSet, Flashcard, AISummary, AIExplanation
 from app.models.chunk import NoteChunk
+from app.models.rag_query import RagQuery

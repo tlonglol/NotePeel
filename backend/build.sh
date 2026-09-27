@@ -23,6 +23,7 @@ pip install \
 
 echo "📂 Copying application code"
 cp lambda_handler.py "$BUILD_DIR"/
+cp run.sh "$BUILD_DIR"/ && chmod +x "$BUILD_DIR"/run.sh   # Lambda Web Adapter entrypoint (streaming)
 cp main.py "$BUILD_DIR"/
 cp ocr_service.py "$BUILD_DIR"/
 cp -r app "$BUILD_DIR"/

@@ -1,0 +1,310 @@
+{
+ "q001:c69ff02577d9": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "names the Golgi apparatus, exactly what was asked",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q001"
+ },
+ "q002:07cafabe50e3": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "correct and complete",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q002"
+ },
+ "q003:4d00bd8a312b": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "names rubisco, the enzyme asked for; omitting 'Calvin cycle' context is not a miss",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q003"
+ },
+ "q004:3867316df7df": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q004"
+ },
+ "q005:719fe983efc1": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q005"
+ },
+ "q006:2f5de04a58b7": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q006"
+ },
+ "q007:23b6c6e1609f": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "judge said no; the answer names metaphase, which is the whole question",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q007"
+ },
+ "q008:3c6d14af1d47": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "judge said partial; p53 is named, nothing else was asked",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q008"
+ },
+ "q009:cc8218e6c2c4": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "judge said partial; prophase I is the answer, tetrad detail is extra",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q009"
+ },
+ "q010:07fe68a04c40": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "judge said partial; nondisjunction and trisomy 21 both present",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q010"
+ },
+ "q011:d8ded1c8e152": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q011"
+ },
+ "q012:e6dd8b69d47f": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "judge said partial; names the Meselson-Stahl experiment as asked",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q012"
+ },
+ "q013:d49a25516a3f": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q013"
+ },
+ "q014:7a4558948cd5": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q014"
+ },
+ "q015:83db0b1066f4": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q015"
+ },
+ "q016:5462589270bb": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q016"
+ },
+ "q017:d581f5d51868": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q017"
+ },
+ "q018:9405be7f22d0": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q018"
+ },
+ "q032:7c1e0ef6ac25": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "judge said no; 'plug in known values last' is the reference fact",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q032"
+ },
+ "q050:a30dbfbdb479": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q050"
+ },
+ "q053:0e940d737955": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q053"
+ },
+ "q054:edf6279c52e1": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q054"
+ },
+ "q058:c500f5bd053c": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q058"
+ },
+ "q090:7628ef653087": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q090"
+ },
+ "q097:0c812deb2a10": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash-lite",
+  "qid": "q097"
+ },
+ "q001:1124b78d0838": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q001"
+ },
+ "q002:f651c8135c34": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q002"
+ },
+ "q003:a28a79b4b24f": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q003"
+ },
+ "q004:870b01f046ba": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q004"
+ },
+ "q005:dbaba34fc9cd": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q005"
+ },
+ "q006:2778079630bf": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "names lactic acid fermentation, the mechanism asked about; judge said partial for omitting the oxygen clause",
+  "model": "gemini-2.5-flash",
+  "qid": "q006"
+ },
+ "q007:89ce6d0570a3": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q007"
+ },
+ "q008:84cffad8a385": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q008"
+ },
+ "q010:021fb37c12d6": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q010"
+ },
+ "q011:f7b496f942d7": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q011"
+ },
+ "q012:8d4fc5e33d86": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "judge scored faith 0.5, but the note does say 'w/ nitrogen isotopes'; the claim is supported",
+  "model": "gemini-2.5-flash",
+  "qid": "q012"
+ },
+ "q013:9de2120534e5": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q013"
+ },
+ "q015:6d6fde003abf": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q015"
+ },
+ "q016:909c93d9b8b8": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q016"
+ },
+ "q017:4c53bb86231a": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q017"
+ },
+ "q018:cf24be0900d7": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q018"
+ },
+ "q019:90b4aadf59cd": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q019"
+ },
+ "q020:b955c95a8a0c": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q020"
+ },
+ "q021:2e60e811c082": {
+  "matches_reference": "yes",
+  "faithful": true,
+  "note": "",
+  "model": "gemini-2.5-flash",
+  "qid": "q021"
+ }
+}

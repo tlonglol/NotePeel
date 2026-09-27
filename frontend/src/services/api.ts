@@ -11,7 +11,10 @@ import type {
   NotebookCreate,
   NotebookUpdate,
   Categories,
-  FlashcardSet
+  FlashcardSet,
+  AskResult,
+  AskCitation,
+  AskConfig
 } from '../types';
 
 // Backend base URL. Configurable per environment via VITE_API_URL
@@ -117,6 +120,45 @@ async function presignAndPut(files: File[]): Promise<string[]> {
   return uploads.map(u => u.key);
 }
 
+// Server-sent events framing, split out so it can be tested against real frames.
+// A network read can land anywhere: mid-frame, mid-line, or on several frames at
+// once, so bytes are buffered and only complete "\n\n"-terminated frames are parsed.
+export class SSEParser {
+  private buffer = '';
+
+  constructor(private readonly onEvent: (evt: { event: string; data: any }) => void) {}
+
+  push(text: string): void {
+    this.buffer += text;
+    let sep: number;
+    while ((sep = this.buffer.indexOf('\n\n')) !== -1) {
+      const frame = this.buffer.slice(0, sep);
+      this.buffer = this.buffer.slice(sep + 2);
+      this.emit(frame);
+    }
+  }
+
+  // A well-behaved server ends every frame with a blank line, but a truncated
+  // stream can leave one buffered; parse it rather than dropping it silently.
+  flush(): void {
+    const frame = this.buffer.trim();
+    this.buffer = '';
+    if (frame) this.emit(frame);
+  }
+
+  private emit(frame: string): void {
+    const lines = frame.split('\n');
+    const eventLine = lines.find(l => l.startsWith('event: '));
+    const dataLine = lines.find(l => l.startsWith('data: '));
+    if (!eventLine || !dataLine) return;
+    try {
+      this.onEvent({ event: eventLine.slice(7).trim(), data: JSON.parse(dataLine.slice(6)) });
+    } catch {
+      // A frame we cannot parse is dropped rather than killing the stream.
+    }
+  }
+}
+
 export const notesAPI = {
   upload: async (file: File, noteType: string = 'default'): Promise<Note> => {
     const [key] = await presignAndPut([file]);
@@ -184,6 +226,54 @@ export const notesAPI = {
 
   getExplanations: (noteId: number): Promise<{ id: number; highlighted_text: string; explanation: string; created_at: string }[]> =>
     fetchWithAuth(`/api/ai/explanations/${noteId}`),
+
+  // Ask your notes (retrieval-grounded Q&A over all of the user's notes)
+  askConfig: (): Promise<AskConfig> => fetchWithAuth('/api/ai/ask/config'),
+
+  ask: (question: string, notebookId?: number): Promise<AskResult> =>
+    fetchWithAuth('/api/ai/ask', { method: 'POST', body: JSON.stringify({ question, notebook_id: notebookId ?? null }) }),
+
+  // Streaming variant: server-sent events (sources -> token* -> done). The handlers
+  // fire as events arrive; resolves with the final `done` payload.
+  askStream: async (
+    question: string,
+    handlers: {
+      onSources?: (sources: AskCitation[], meta: { gate_triggered: boolean; top_score: number | null }) => void;
+      onToken?: (text: string) => void;
+    },
+    notebookId?: number,
+  ): Promise<{ answer: string; abstained: boolean; citations: AskCitation[]; query_id: number | null }> => {
+    const token = getToken();
+    const response = await fetch(`${API_URL}/api/ai/ask/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ question, notebook_id: notebookId ?? null }),
+    });
+    if (!response.ok || !response.body) {
+      const err = await response.json().catch(() => ({ detail: 'Request failed' }));
+      throw new Error(err.detail || 'Request failed');
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let done: { answer: string; abstained: boolean; citations: AskCitation[]; query_id: number | null } | null = null;
+    const parser = new SSEParser(evt => {
+      if (evt.event === 'sources') {
+        handlers.onSources?.(evt.data.sources, { gate_triggered: evt.data.gate_triggered, top_score: evt.data.top_score });
+      } else if (evt.event === 'token') {
+        handlers.onToken?.(evt.data.text);
+      } else if (evt.event === 'done' || evt.event === 'error') {
+        done = evt.data;
+      }
+    });
+    while (true) {
+      const { value, done: finished } = await reader.read();
+      if (finished) break;
+      parser.push(decoder.decode(value, { stream: true }));
+    }
+    parser.flush();
+    if (!done) throw new Error('Stream ended without a result');
+    return done;
+  },
 };
 
 export const notebooksAPI = {

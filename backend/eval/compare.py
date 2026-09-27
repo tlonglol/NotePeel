@@ -32,6 +32,7 @@ def main(argv=None) -> int:
     ap.add_argument("mode_a")
     ap.add_argument("mode_b")
     ap.add_argument("--chunking", default=None)
+    ap.add_argument("--tag", default=None, help="only questions carrying this tag (e.g. hard-v2)")
     args = ap.parse_args(argv)
 
     d = json.load(open(args.results))
@@ -45,8 +46,8 @@ def main(argv=None) -> int:
         return cands[0]
 
     a, b = pick(args.mode_a), pick(args.mode_b)
-    ra: Dict[str, dict] = {r["id"]: r for r in a["questions"]}
-    rb: Dict[str, dict] = {r["id"]: r for r in b["questions"]}
+    ra: Dict[str, dict] = {r["id"]: r for r in a["questions"] if not args.tag or args.tag in r.get("tags", [])}
+    rb: Dict[str, dict] = {r["id"]: r for r in b["questions"] if r["id"] in ra}
 
     below = [qid for qid, r in ra.items() if first_rank(r) != 1]
     fixed = improved = same = worse = 0

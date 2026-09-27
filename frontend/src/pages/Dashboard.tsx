@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { notesAPI } from '../services/api';
-import type { Note, NoteWithImage, Categories } from '../types';
+import type { AskCitation, Note, NoteWithImage, Categories } from '../types';
 import { getUploadFeedback, isExtractionLikelyIncomplete, prepareContentForDisplay } from '../utils/noteExtraction';
 import ProfileMenu from '../components/ProfileMenu';
 
@@ -99,7 +99,18 @@ export default function Dashboard({ userEmail, onLogout, onOpenSettings, initial
   const [batchMode, setBatchMode] = useState<'merge' | 'separate'>('merge');
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, status: '' });
   const [hoveredTopMenu, setHoveredTopMenu] = useState<string | null>(null);
-  
+
+  // Ask your notes (retrieval-grounded Q&A)
+  const [showAsk, setShowAsk] = useState(false);
+  const [askQuestion, setAskQuestion] = useState('');
+  const [askAnswer, setAskAnswer] = useState('');
+  const [askCitations, setAskCitations] = useState<AskCitation[]>([]);
+  const [askSources, setAskSources] = useState<AskCitation[]>([]);
+  const [askAbstained, setAskAbstained] = useState(false);
+  const [askLoading, setAskLoading] = useState(false);
+  const [askError, setAskError] = useState('');
+  const [askStreaming, setAskStreaming] = useState<boolean | null>(null);
+
   const editorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const savedSelectionRef = useRef<Range | null>(null);
@@ -1018,6 +1029,84 @@ export default function Dashboard({ userEmail, onLogout, onOpenSettings, initial
   // Legacy function for backward compatibility - now opens picker
   const handleExplain = handleExplainClick;
 
+  // ── Ask your notes ──
+  const openAsk = async () => {
+    setShowAsk(true);
+    setActiveMenu(null);
+    if (askStreaming === null) {
+      try {
+        const cfg = await notesAPI.askConfig();
+        setAskStreaming(cfg.streaming);
+      } catch {
+        setAskStreaming(false);
+      }
+    }
+  };
+
+  const handleAsk = async () => {
+    const q = askQuestion.trim();
+    if (!q || askLoading) return;
+    setAskLoading(true);
+    setAskError('');
+    setAskAnswer('');
+    setAskCitations([]);
+    setAskSources([]);
+    setAskAbstained(false);
+    try {
+      if (askStreaming) {
+        const done = await notesAPI.askStream(q, {
+          onSources: (sources) => setAskSources(sources),
+          onToken: (text) => setAskAnswer(prev => prev + text),
+        });
+        setAskAnswer(done.answer);
+        setAskCitations(done.citations);
+        setAskAbstained(done.abstained);
+      } else {
+        const result = await notesAPI.ask(q);
+        setAskAnswer(result.answer);
+        setAskCitations(result.citations);
+        setAskSources(result.sources);
+        setAskAbstained(result.abstained);
+      }
+    } catch (err) {
+      setAskError(err instanceof Error ? err.message : 'Failed to get an answer');
+    } finally {
+      setAskLoading(false);
+    }
+  };
+
+  const openCitedNote = async (citation: AskCitation) => {
+    setShowAsk(false);
+    const target = notes.find(n => n.id === citation.note_id);
+    if (target) {
+      await viewNote(target);
+    } else {
+      await viewNote({ id: citation.note_id, title: citation.note_title } as Note);
+    }
+  };
+
+  // Render [n] markers in an answer as clickable citation chips.
+  const renderAnswerWithCitations = (text: string) => {
+    const parts = text.split(/(\[\d+\])/g);
+    return parts.map((part, i) => {
+      const m = part.match(/^\[(\d+)\]$/);
+      if (!m) return <span key={i}>{part}</span>;
+      const n = parseInt(m[1], 10);
+      const c = askSources.find(src => src.n === n) || askCitations.find(src => src.n === n);
+      if (!c) return <span key={i}>{part}</span>;
+      return (
+        <button
+          key={i}
+          onClick={() => openCitedNote(c)}
+          title={`${c.note_title}${c.heading ? ' › ' + c.heading : ''}`}
+          style={{ display: 'inline-block', margin: '0 2px', padding: '0 7px', borderRadius: '10px', border: '1px solid #FF9800', background: darkMode ? '#3a2a10' : '#FFF3E0', color: '#E65100', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', lineHeight: '18px', verticalAlign: 'baseline' }}
+        >
+          {n}
+        </button>
+      );
+    });
+  };
+
   const menuItemStyle: React.CSSProperties = {
     padding: '8px 20px',
     cursor: 'pointer',
@@ -1481,6 +1570,9 @@ export default function Dashboard({ userEmail, onLogout, onOpenSettings, initial
               <div style={{...menuItemStyle, color: selectedNote ? theme.text : theme.textSecondary}} onMouseEnter={(e) => (e.currentTarget.style.background = theme.menuHover)} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')} onClick={() => { if (selectedNote) { handleSummarize(); setActiveMenu(null); } }}>
                 <span>📋 Summarize Note</span>
                 {generatingSummary && <span style={{ fontSize: '11px', color: theme.textSecondary }}>...</span>}
+              </div>
+              <div style={{...menuItemStyle, color: theme.text}} onMouseEnter={(e) => (e.currentTarget.style.background = theme.menuHover)} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')} onClick={() => { openAsk(); }}>
+                <span>💬 Ask Your Notes</span>
               </div>
               <div style={{ borderTop: `1px solid ${theme.border}`, margin: '4px 0' }} />
               <div style={{...menuItemStyle, color: theme.text}} onMouseEnter={(e) => (e.currentTarget.style.background = theme.menuHover)} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')} onClick={() => { handleExplain(); setActiveMenu(null); }}>
@@ -2575,6 +2667,59 @@ export default function Dashboard({ userEmail, onLogout, onOpenSettings, initial
       )}
 
       {/* ── Summary Modal ── */}
+      {showAsk && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }} onClick={() => setShowAsk(false)}>
+          <div style={{ background: theme.cardBg, borderRadius: '16px', padding: '28px', maxWidth: '680px', width: '92%', maxHeight: '85vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h2 style={{ margin: 0, color: '#E65100', fontSize: '18px' }}>💬 Ask Your Notes</h2>
+              <button onClick={() => setShowAsk(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', color: theme.text }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+              <input
+                value={askQuestion}
+                onChange={(e) => setAskQuestion(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAsk(); }}
+                placeholder="Ask a question about anything in your notes…"
+                autoFocus
+                style={{ flex: 1, padding: '10px 14px', borderRadius: '10px', border: `1px solid ${theme.border}`, background: theme.inputBg ?? theme.cardBg, color: theme.text, fontSize: '15px' }}
+              />
+              <button onClick={handleAsk} disabled={askLoading || !askQuestion.trim()} style={{ padding: '10px 18px', borderRadius: '10px', border: 'none', background: askLoading ? '#FFCC80' : '#FF9800', color: '#fff', fontWeight: 'bold', cursor: askLoading ? 'wait' : 'pointer' }}>
+                {askLoading ? 'Thinking…' : 'Ask'}
+              </button>
+            </div>
+            {askError && <div style={{ color: '#EF5350', marginBottom: '10px' }}>{askError}</div>}
+            {(askAnswer || askLoading) && (
+              <div style={{ background: darkMode ? '#3a2a10' : '#FFF8E1', borderRadius: '12px', padding: '20px', lineHeight: '1.8', color: theme.text, fontSize: '15px', whiteSpace: 'pre-wrap', minHeight: '48px' }}>
+                {askAnswer ? renderAnswerWithCitations(askAnswer) : (askSources.length ? 'Reading your notes…' : 'Searching your notes…')}
+                {askAbstained && !askLoading && (
+                  <div style={{ marginTop: '10px', fontSize: '13px', color: theme.textSecondary }}>
+                    Answers only come from your notes, so nothing was made up here.
+                  </div>
+                )}
+              </div>
+            )}
+            {(askCitations.length > 0 || (askAbstained && askSources.length > 0)) && !askLoading && (
+              <div style={{ marginTop: '14px' }}>
+                <div style={{ fontSize: '12px', color: theme.textSecondary, marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {askCitations.length > 0 ? 'Sources' : 'Closest notes (not used)'}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {(askCitations.length > 0 ? askCitations : askSources.slice(0, 3)).map(c => (
+                    <button key={c.chunk_id} onClick={() => openCitedNote(c)} style={{ textAlign: 'left', padding: '8px 12px', borderRadius: '10px', border: `1px solid ${theme.border}`, background: 'transparent', color: theme.text, cursor: 'pointer' }}>
+                      <span style={{ color: '#E65100', fontWeight: 'bold', marginRight: '8px' }}>[{c.n}]</span>
+                      <span style={{ fontWeight: 'bold' }}>{c.note_title}</span>
+                      {c.heading && <span style={{ color: theme.textSecondary }}> › {c.heading}</span>}
+                      {c.page > 1 && <span style={{ color: theme.textSecondary }}> · page {c.page}</span>}
+                      <div style={{ fontSize: '12px', color: theme.textSecondary, marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.snippet}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {showSummary && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }} onClick={() => setShowSummary(false)}>
           <div style={{ background: theme.cardBg, borderRadius: '16px', padding: '30px', maxWidth: '600px', width: '90%', maxHeight: '80vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }} onClick={(e) => e.stopPropagation()}>

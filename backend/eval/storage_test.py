@@ -74,8 +74,9 @@ def main(argv=None) -> int:
     print(f"rows scanned per query: {n} (eval user), queries: {len(vecs)}, repeats: {args.repeats}")
     print("| storage | attstorage | heap size | toast+indexes | p50 ms | p95 ms | n |")
     print("|---|---|---|---|---|---|---|")
-    print(f"| EXTERNAL (pgvector default) | {before_info['attstorage']} | {before_info['heap']} | {before_info['toast_and_indexes']} | {before['p50']} | {before['p95']} | {before['n']} |")
-    print(f"| PLAIN | {after_info['attstorage']} | {after_info['heap']} | {after_info['toast_and_indexes']} | {after['p50']} | {after['p95']} | {after['n']} |")
+    for label, info, b in (("EXTERNAL (pgvector default)", before_info, before), ("PLAIN", after_info, after)):
+        print(f"| {label} | {info['attstorage']} | {info['heap']} | {info['toast_and_indexes']} | "
+              f"{b['p50']} | {b['p95']} | {b['n']} |")
     return 0
 
 

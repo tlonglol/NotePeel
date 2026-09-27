@@ -11,6 +11,9 @@ from app.models.note import Note
 from app.models.flashcard import FlashcardSet, Flashcard, AISummary, AIExplanation
 from app.controllers.auth_controller import get_current_user
 from app.services import workers_ai
+from app.config import get_settings
+from app.rag.ask import ask as rag_ask, ask_stream as rag_ask_stream, sse
+from fastapi.responses import StreamingResponse
 
 router = APIRouter(prefix="/api/ai", tags=["AI"])
 
@@ -264,3 +267,62 @@ async def categorize_note(
         "tags": tags,
         "cached": False
     }
+
+
+# ── Ask your notes (retrieval-grounded Q&A) ──
+
+class AskRequest(BaseModel):
+    question: str
+    notebook_id: int | None = None
+    mode: str | None = None       # override: vector | hybrid | fts (default from settings)
+
+
+@router.get("/ask/config")
+def ask_config():
+    s = get_settings()
+    return {
+        "retrieval_mode": s.rag_retrieval_mode,
+        "generation_model": s.rag_generation_model,
+        "streaming": s.rag_streaming_enabled,
+    }
+
+
+# Sync handlers on purpose: retrieval and generation are blocking calls, and a
+# `def` route runs in FastAPI's threadpool instead of blocking the event loop.
+@router.post("/ask")
+def ask_notes(
+    body: AskRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    q = body.question.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Question is empty")
+    if len(q) > 1000:
+        raise HTTPException(status_code=400, detail="Question is too long (max 1000 characters)")
+    if body.mode and body.mode not in ("vector", "hybrid", "fts"):
+        raise HTTPException(status_code=400, detail="mode must be vector, hybrid or fts")
+    return rag_ask(db, current_user.id, q, notebook_id=body.notebook_id, mode=body.mode).to_dict()
+
+
+@router.post("/ask/stream")
+def ask_notes_stream(
+    body: AskRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Server-sent events: `sources` first, then `token` deltas, then `done`.
+    Streams for real under uvicorn and under the Lambda Web Adapter with
+    RESPONSE_STREAM; under plain Mangum the body is buffered until the end."""
+    q = body.question.strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="Question is empty")
+    if len(q) > 1000:
+        raise HTTPException(status_code=400, detail="Question is too long (max 1000 characters)")
+
+    def gen():
+        for ev in rag_ask_stream(db, current_user.id, q, notebook_id=body.notebook_id, mode=body.mode):
+            yield sse(ev)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

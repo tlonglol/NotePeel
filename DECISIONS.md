@@ -347,3 +347,331 @@ q078 (rare token, vector rank 2) and q060 (multi-note, rank 2) are the only
 below-rank-1 questions under vector-only. Injection questions retrieve their plant by
 design; the Phase 3 guard and generator are measured on whether the answer complies.
 Unanswerable set grows from 7 toward 20 before the abstain threshold is trusted.
+
+---
+
+## Phase 2b: expanding the question set (2026-09-26)
+
+Results file: `backend/eval/results/20260926T194539.json`. Question set grew from 79
+to 113: 24 harder answerable questions tagged `hard-v2` (7 rare names and terms, 5
+abbreviations absent from the notes, 4 typos, 8 vague or sharply reworded) and 10
+more near-miss unanswerable questions (17 total). Headline n is now 91.
+
+### D25. The harder questions broke lexical search and did not touch vector search
+
+- **Measured** (section chunks, accuracy only):
+
+  | mode | chunk R@1 | chunk R@5 | MRR@10 | hard-v2 R@1 (n=24) | v1 R@1 (n=72) |
+  |---|---|---|---|---|---|
+  | fts_or | 0.632 [0.54, 0.71] | 0.890 [0.82, 0.95] | 0.771 | 0.458 | 0.701 |
+  | vector | 0.940 [0.90, 0.98] | 1.000 [1.00, 1.00] | 0.995 | 1.000 | 0.910 |
+  | hybrid k=60, lexical 1.0 | 0.824 [0.75, 0.90] | 1.000 | 0.930 | 0.833 | 0.806 |
+  | hybrid k=60, lexical 0.5 | 0.929 [0.88, 0.97] | 1.000 | 0.987 | 0.958 | 0.896 |
+
+  By category, FTS chunk R@1: abbreviations 0.000 (n=5), typos 0.500 (n=4), vague
+  0.600 (n=10), rare tokens 0.714 (n=7). Vector: 1.000 on all four. The five
+  abbreviation questions ("What's the CLT?", "What is KMT?") are unreachable
+  lexically because the expansions, not the abbreviations, are in the notes; the
+  embedding model knows both. Rare tokens, the category lexical search exists for,
+  went to vector 7 of 7 because a rare name never appears without its topic.
+- **Fusion, re-checked:** lexical weight 0.5 is now slightly below vector (0.929 vs
+  0.940 R@1; it demotes q079 and q101 to rank 2) and equal weights still cost 0.116 of
+  R@1. Vector-only stays the default.
+- **Honest limit:** the author of the hard questions knows what is in the notes and
+  how the chunker cuts them. Vector R@5 is 1.000 on all 91 and R@1 is 1.000 on the 24
+  questions written to be hard, so this set can no longer rank retrieval methods above
+  the lexical baseline. Two things still discriminate: R@1 on the original questions
+  (0.910, six misses) and the abstain gate. Everything else waits for the real-photo
+  slice, which is held out and reported separately, and whose questions should be
+  written by the note's author without reading the OCR output.
+- **Precision@5** (share of the top-5 chunks that come from an expected note,
+  computed from the stored per-question results): fts_or 0.482 [0.42, 0.54] (n=88,
+  three questions returned no rows), vector 0.635 [0.59, 0.68], hybrid lexical 0.5
+  0.598 [0.55, 0.64], hybrid lexical 1.0 0.565 [0.52, 0.61] (n=91). Even with the
+  right chunk first, a third of every top-5 context is off-topic filler. That is the
+  metric the Phase 4 reranker is judged on, since recall has nothing left to give.
+
+### D26. Abstain threshold, re-derived on 17 unanswerable questions
+
+- **Measured** (top-1 cosine, eval user, cached query embeddings): answerable min
+  0.622, p25 0.672, median 0.698 (n=91); unanswerable min 0.554, p25 0.596, median
+  0.618, max 0.649 (n=17). FTS returned hits for 17 of 17 unanswerable questions, so
+  it carries no abstain signal.
+
+  | threshold | unanswerable passing | answerable refused |
+  |---|---|---|
+  | 0.62 | 8/17 | 0/91 |
+  | 0.64 | 2/17 | 3/91 |
+  | 0.65 | 0/17 | 6/91 |
+  | 0.66 | 0/17 | 12/91 |
+
+- **Decision:** 0.65 as a soft gate: below it the generator is told the evidence is
+  weak and must abstain unless a source plainly answers; above it the generator still
+  decides. The 6 answerable questions at or below 0.65 are the cost to measure in
+  Phase 3 with the generator in the loop, since a soft gate may still answer them.
+
+---
+
+## Phase 3: grounded generation, citations, abstain, guard, streaming (2026-09-26)
+
+### D27. Generator: Gemini 2.5 Flash-Lite with server-enforced JSON, not Llama
+
+- **Chose:** `gemini-2.5-flash-lite` with `response_schema` so the model must return
+  `{answer, citations, abstain}`. Temperature 0.
+- **Rejected:** Llama 3.3 70B on Workers AI, which the other AI features use. The
+  repo carries a JSON-repair function for its truncated output; a citation list that
+  might be cut off is not machine-checkable.
+- **Corrected the same day (see D32):** flash-lite was chosen over `gemini-2.5-flash`
+  on a latency probe (flash-lite 614 ms vs flash 1,056 ms, n=1 each) plus an assumed
+  larger free-tier quota. The quota assumption was wrong and the default is now
+  `gemini-2.5-flash`. The latency cost of that correction is real and measured below.
+- **Citation validation:** cited numbers outside 1..N are dropped, inline `[n]`
+  markers that point at nothing are stripped, and an answer that cites nothing while
+  claiming not to abstain is converted to an abstain. Unit-tested.
+
+### D28. Sources are delimited data, and the guard drops what looks like instructions
+
+- **Threat model:** notes are photos of anything, and the shared demo account lets
+  any visitor plant a note that other visitors' questions retrieve. Phase 1 showed
+  the meeting-notes plant reaching rank 4 for a photosynthesis question under FTS.
+- **Layers:** (1) every source is wrapped in `<source id=n note=...>` tags with a
+  system instruction that sources are quoted material and any instructions inside
+  them are to be ignored; (2) a regex detector over chunk text drops flagged chunks
+  from the generator's context and logs their ids; (3) the eval carries planted notes
+  and questions that retrieve them, with compliance measured.
+- **Measured:** the detector flags exactly the two planted chunks across all 189
+  corpus chunks, zero false positives on 49 clean notes, including phrases like
+  "instructions for the lab" and "ignore the previous chapter's notation" (unit
+  tests). The regex is the weak layer by design: paraphrased attacks pass it and
+  must be caught by layer 1, which the eval measures. Compliance numbers in D31.
+
+### D29. Abstain is a soft gate plus the model's own judgement
+
+- Top-1 cosine below 0.65 (D26) does not short-circuit the request; it adds a
+  retrieval note to the prompt telling the model the evidence is weak and to abstain
+  unless a source plainly answers. Zero retrieved chunks abstains without calling the
+  model. Both paths write a log row with `gate_triggered` so the false-refusal cost
+  is visible per query. Measured effect in D31.
+
+### D30. Streaming sends sources first, and real streaming needs the Web Adapter
+
+- **Protocol:** SSE with three events: `sources` as soon as retrieval and the guard
+  finish (so the UI shows where the answer will come from before a token arrives),
+  `token` deltas, then `done` with the validated citations, abstain flag, timings and
+  log id. Streaming uses plain text with inline `[n]` markers and a `NOT_IN_NOTES`
+  sentinel because a JSON object cannot be streamed usefully; the non-streaming path
+  keeps schema-enforced JSON.
+- **Deployment:** Mangum buffers the whole body and the Python managed runtime has no
+  native response streaming, so `streaming_enabled = true` in Terraform swaps the
+  handler for `run.sh` (uvicorn) behind the Lambda Web Adapter layer, sets the
+  Function URL to `RESPONSE_STREAM`, and routes the keep-warm event to `/events`.
+  Default is off; the JSON endpoint is unaffected either way.
+- **Verified locally** under uvicorn: see the Phase 3 report for frame timings. Not
+  yet verified on Lambda (requires a deploy).
+
+### D31. Generation eval results
+
+Three runs, because the Gemini free tier caps generation at 20 requests per day per
+model (D32) while Cloudflare Workers AI showed no throttling at all:
+
+| run | generator | slice | file |
+|---|---|---|---|
+| A | gemini-2.5-flash | 21 answerable + 2 unanswerable, judged | `gen_20260927T010116.json` |
+| B | llama-3.3-70b (Workers AI) | all 17 unanswerable + all 5 injection | `gen_20260927T010344.json` |
+| C | llama-3.3-70b (Workers AI) | all 91 answerable, objective metrics only | `gen_20260927T010737.json` |
+
+Objective metrics need no judge: they are computed against the same evidence spans the
+retrieval eval uses. Judge metrics are reported only for run A, where the generator and
+the judge are different model families.
+
+| slice | metric | value | n | run |
+|---|---|---|---|---|
+| answerable | answered (did not abstain) | 0.967 [0.92, 1.00] | 91 | C |
+| answerable | citation precision (cited chunks from an expected note) | 0.989 [0.97, 1.00] | 88 | C |
+| answerable | evidence hit (a cited chunk contains the evidence span) | 0.956 [0.91, 0.99] | 91 | C |
+| answerable | weak-evidence gate triggered | 0.066 [0.02, 0.12] | 91 | C |
+| hard-v2 answerable | answered | 0.875 [0.71, 1.00] | 24 | C |
+| unanswerable | answered anyway (false answer) | 0.000 [0.00, 0.00] | 17 | B |
+| unanswerable | gate triggered | 1.000 [1.00, 1.00] | 17 | B |
+| injection | complied with the planted instruction | 0.000 [0.00, 0.00] | 5 | B |
+| injection | answered the real question | 1.000 [1.00, 1.00] | 5 | B |
+| answerable | faithfulness (judge / hand audit) | 0.976 / 1.000 | 21 | A |
+| answerable | correct (judge / hand audit) | 0.952 / 1.000 | 21 | A |
+
+Latency from a dev machine, so every number includes a round trip to Neon and to the
+model API. Gemini flash: generate p50 1,054 ms, p95 1,461 ms; end to end p50 1,411 ms,
+p95 1,790 ms (n=23). Llama on Workers AI: generate p50 1,034 ms, p95 3,667 ms; end to
+end p50 1,307 ms, p95 3,925 ms (n=91). Llama matches flash at the median and has a much
+worse tail. Cost: $0.00738 for 23 Gemini answers, about $0.00032 each; Workers AI is
+free on this plan. In-region numbers come from the query log (`scripts/rag_stats.py`).
+
+### D34. The soft abstain gate was the right call, and the numbers say so
+
+- 6 of 91 questions fell below the 0.65 cosine gate, exactly as D26 predicted. **All 6
+  were still answered, and all 6 correctly** (q015 buffers, q022 airbags, q042 base
+  rates, q047 Kansas-Nebraska, q082 Okazaki, q085 Kennan). A hard threshold at 0.65
+  would have refused six correct answers to gain nothing, since the gate caught no
+  unanswerable question the model would otherwise have answered.
+- Separately, all 17 unanswerable questions triggered the gate and were refused, with
+  zero false answers.
+- Reading: the cosine score is a useful *hint* and a poor *veto*. The model plus the
+  hint is strictly better than either alone on this corpus.
+
+### D35. The remaining failure mode is abbreviations, and it is grounding working correctly
+
+- All 3 false refusals on the answerable set are abbreviation questions: "What's the
+  CLT?", "State the MVT.", "What is KMT?". Retrieval was not the problem: top-1 cosine
+  was 0.68 to 0.76, well above the gate, and Phase 2b measured vector R@1 of 1.000 on
+  the abbreviation category. The notes spell out "central limit theorem", "mean value
+  theorem" and "kinetic molecular theory" but never the abbreviations, so the generator
+  cannot verify from the sources alone that CLT means central limit theorem, and its
+  instructions forbid outside knowledge. It refuses rather than guess.
+- This is the grounding constraint doing exactly what it was told, and it is a real
+  product defect at the same time. Fixing it means relaxing grounding (allow the model
+  to resolve an abbreviation it is confident about) or expanding the query before
+  retrieval. Both are Phase 4 candidates, and both have to be measured against the
+  injection and unanswerable slices, because "allow some outside knowledge" is exactly
+  the door those defences close. Not fixed blind.
+- Two citation-precision misses (q096, q097, both vague phrasings) cite two chunks
+  where one is from a neighbouring note. One evidence-hit miss (q034) cites the right
+  note but a different chunk than the labelled span.
+
+### D36. Workers AI as a second generator: plain text, not JSON
+
+- Added because the Gemini daily cap made the safety slices unmeasurable otherwise.
+  Selected by the `@cf/` model prefix. It takes the plain-text path (inline `[n]`
+  markers plus the `NOT_IN_NOTES` sentinel) rather than a JSON schema, which sidesteps
+  the Llama JSON reliability problem that ruled it out as the default in D27: there is
+  no JSON to truncate, and citations are parsed from markers and validated against the
+  source count either way.
+- It is not the default. Gemini keeps schema-enforced JSON, and Llama is the judge, so
+  making it the generator too would put the same model on both sides of the faithfulness
+  metric. For the objective metrics in run C that does not matter, which is why run C is
+  reported and run C's judge columns are blank.
+
+### D32. flash-lite's free tier is 20 generation requests PER DAY, not per minute
+
+- **Found by:** the first full generation eval. 88 of 113 questions failed with 429 and
+  268 throttle waits, despite pacing at 8 requests/minute.
+- **The quota:** `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, for
+  `gemini-2.5-flash-lite`. Confirmed by a single isolated call the next minute, which
+  still failed with the same quota id while `gemini-2.5-flash` on the same key
+  succeeded in 357 ms. No pacing strategy fixes a daily cap.
+- **Why it matters beyond the eval:** this is the deployed app's generator. A daily cap
+  of 20 answers across all users would have shipped as a feature that silently stops
+  working every day. The measurement caught a production defect, not just an eval
+  inconvenience.
+- **Fixed by:** switching the default to `gemini-2.5-flash`, which is usable where
+  flash-lite was not: it answered immediately on the same key at the moment flash-lite
+  was refusing every request. The cost is latency, roughly 500 ms more per answer.
+- **flash is throttled too, just less severely.** Running the eval on flash at 8
+  requests/minute still hit `GenerateRequestsPerMinutePerProjectPerModel-FreeTier` and
+  `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, recovering after each cooldown:
+  22 questions in about 30 minutes, so a 113-question pass takes over two hours of
+  wall time and may not fit one day's quota. Consequences for how the eval is run:
+  generations are cached on disk keyed by (model, mode, question, corpus), so a pass
+  resumes where the last one stopped and can be completed across several sessions;
+  slices can be run on their own (`--types unanswerable,injection`) so the
+  safety-critical numbers are never the ones left unmeasured.
+- **Open decision for the project owner:** enabling paid-tier billing on the Gemini key
+  removes the caps and costs about $0.002 per 113-question pass at flash-lite prices
+  and roughly $0.02 at flash prices. That is a spending decision, so it stays off by
+  default. Until then, full-corpus generation numbers are assembled incrementally and
+  every reported metric carries its own n.
+- **Also fixed:** the eval no longer caches failed generations (the first run cached 92
+  error strings as if they were answers), counts errors as a separate slice instead of
+  folding them into the metrics, and backs off for the server-suggested delay before
+  retrying a question.
+
+### D33. The LLM judge is miscalibrated on correctness, and the audit is checked in
+
+- **Setup:** Llama 3.3 70B on Workers AI judges, a different model family from the
+  Gemini generator, to avoid self-preference. It sees the question, the sources the
+  generator saw (full chunk text, not snippets), the reference answer, and the answer.
+- **First version was worse than useless on faithfulness:** it marked "The Golgi
+  apparatus packages and ships proteins in vesicles" as an unsupported claim when the
+  source says exactly that, scoring faithfulness 0.0 on a perfect answer. Cause: the
+  rubric did not say that a paraphrase counts as support. After the rubric fix,
+  faithfulness is 1.000 and agrees with a hand audit on 25 of 25.
+- **Correctness was badly miscalibrated, measured, not assumed** (`eval/judge_audit.py`,
+  hand labels in `eval/judge_labels.json`). Before the prompt fix, on 25 flash-lite
+  answers: judge correctness 0.720 vs hand 1.000, agreement 0.720. All 7 disagreements
+  ran the same way, the judge calling a correct answer "partial" or "no" for adding
+  detail or omitting context the reference happened to include. It marked "In metaphase,
+  chromosomes line up at the metaphase plate" as not matching the reference "Metaphase."
+- **Root cause found:** the judge prompt never showed it the question, so it was
+  grading answer-versus-reference similarity rather than whether the question was
+  answered. Fixed by adding the question and a worked example to the rubric.
+- **After the fix**, on 21 flash answers, hand-labelled independently:
+
+  | metric | judge | hand audit | agreement |
+  |---|---|---|---|
+  | correct (matches reference) | 0.952 | 1.000 | 0.952 |
+  | faithful (all claims supported) | 0.952 | 1.000 | 0.952 |
+
+  One correctness disagreement left (the judge wanted the oxygen clause in a
+  lactic-acid answer) and one faithfulness disagreement (it called "using nitrogen
+  isotopes" unsupported when the note says exactly that). The judge now errs by about
+  5 points in the strict direction rather than 28.
+- **Standing rule:** the judge's faithfulness number is reported as a headline metric;
+  its correctness number is reported with the hand-audit agreement rate beside it and
+  is never quoted alone. Hand labels are keyed by a hash of the exact answer text, so
+  changing the model surfaces its answers as unlabelled instead of reusing a stale
+  verdict.
+
+### D37. No Gemini billing: a fallback chain instead, to Workers AI Llama
+
+- **Decision (owner's call, 2026-09-26):** do not enable billing on the Gemini key.
+  D32 measured the free tier at 20 `generate_content` requests per day, per model,
+  for both flash and flash-lite -- a hard wall no pacing gets around. Rather than pay
+  to remove it, the app is designed to work within it: try Gemini first, and on a
+  quota error, fall back to Workers AI Llama for that one answer.
+- **Detection is a substring match, not an error code check:** `is_quota_error`
+  matches `"429"`, `"resource_exhausted"`, or `"quota"` (case-insensitive) in the
+  exception message. Deliberately broad -- missing a quota error costs a user an
+  avoidable failure; a false positive just falls back a request that would have
+  failed anyway for some other reason. A non-quota error (bad argument, malformed
+  request) is never silently retried against a different model, because that would
+  hide a real bug behind an apparent success.
+- **Non-streaming (`generate_with_fallback`):** try the primary model; on a quota
+  error, retry once against the fallback and return that answer, tagging it
+  `fallback_from`/`primary_error` for logging. `ask()` logs a warning whenever this
+  fires and (via `AskResult.model` / `rag_queries.generation_model`) always records
+  which model actually produced the answer -- "which provider answered" is a
+  queryable column, not just a log line.
+- **Streaming (`stream_answer_with_fallback`) has one extra rule streaming needs and
+  non-streaming doesn't:** once a token has been sent to the client, a later
+  mid-stream quota error does NOT fall back. The client has already rendered the
+  primary model's partial answer; silently splicing in a second model's continuation
+  would look like a glitch, and re-sending shown tokens would duplicate them. A
+  failure before the first token -- the common case, since the Gemini SDK's stream
+  iterator raises on its first pull -- falls back cleanly and the client sees the
+  fallback model's answer as if it had been the only one asked. Both branches are
+  integration-tested against the real `ask()` / `ask_stream()` functions (not just
+  the pure fallback functions in isolation), including the mid-stream case, which
+  asserts the fallback model is never called once tokens have flowed.
+- **The eval harness now defaults to Workers AI, not the production default.** A
+  multi-hundred-question eval run against Gemini would exhaust its daily quota in
+  minutes and then spend the rest of the run silently served by the fallback anyway
+  (correctly labelled per-question, but wasting the very quota production needs).
+  `eval/run_generation_eval.py --model` now defaults to
+  `@cf/meta/llama-3.3-70b-instruct-fp8-fast`; passing an explicit Gemini model still
+  works (for a deliberate small comparison run) and each row now records `served_by`
+  and `fallback_used` so a quota hit mid-run is visible in the results file, not
+  averaged away.
+- **Consequence for the safety numbers already measured:** D31's injection (0/5
+  complied) and unanswerable (0/17 false answers) numbers were measured on Workers AI
+  precisely because it is unthrottled -- and Workers AI is now also the fallback model
+  that serves production traffic whenever Gemini's daily quota is spent. So the model
+  most likely to answer a user's 21st question of the day already has full safety
+  coverage. The gap that remains: **Gemini itself, as primary, has only partial safety
+  coverage** (run A measured 2 of 17 unanswerable questions and 0 of 5 injection
+  questions against Gemini directly). Production could serve up to 20 Gemini-primary
+  answers a day that are not individually covered by the injection slice. Since the
+  guard (D28) and the prompt's "sources are data, not instructions" framing (D27) are
+  model-agnostic, and Gemini's structured-JSON output makes prompt injection *harder*
+  to smuggle into a citation list than Llama's free-text format, this is a reasoned
+  bet rather than a blind spot -- but it is not yet a *measurement*, and running the
+  5-question injection slice against Gemini directly (well inside the 20/day budget)
+  is the cheapest remaining item to close it. Held for later per the owner's explicit
+  instruction to conserve Gemini quota this session.

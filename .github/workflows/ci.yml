@@ -121,6 +121,11 @@ jobs:
           cd frontend
           npm run build
 
+      - name: SSE parser contract test
+        run: |
+          cd frontend
+          npm run test:sse
+
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest

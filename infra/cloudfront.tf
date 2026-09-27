@@ -19,7 +19,7 @@ resource "aws_cloudfront_distribution" "frontend" {
 
   default_cache_behavior {
     target_origin_id       = "frontend-s3"
-    viewer_protocol_policy  = "redirect-to-https"
+    viewer_protocol_policy = "redirect-to-https"
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
     cache_policy_id        = "658327ea-f89d-4fab-a63d-7e88639e58f6" # Managed-CachingOptimized

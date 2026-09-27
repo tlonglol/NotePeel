@@ -14,23 +14,32 @@ HEADERS = {"Authorization": f"Bearer {settings.cf_api_token}"}
 
 async def _call(system: str, user: str) -> str:
     """Base function — all Workers AI calls go through here."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    return await _call_model(MODEL, system, user)
+
+
+async def _call_model(model: str, system: str, user: str, max_tokens: int | None = None) -> str:
+    """Same as _call but against an explicit model, with an optional token cap.
+    Used by the retrieval layer's Workers AI generation path."""
+    payload: dict = {
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+    }
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+    async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
-            f"{BASE_URL}/{MODEL}",
+            f"{BASE_URL}/{model}",
             headers=HEADERS,
-            json={
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user}
-                ]
-            }
+            json=payload,
         )
         data = response.json()
         if not data.get("success"):
             raise Exception(f"Workers AI error: {data}")
         
         result = data["result"]["response"]
-        
+
         if isinstance(result, list):
             # cloudflare might return token strings or a structured list
             if all(isinstance(item, str) for item in result):
@@ -38,7 +47,10 @@ async def _call(system: str, user: str) -> str:
             else:
                 # Already structured data, re-serialize for consistent handling
                 result = json.dumps(result)
-        
+        elif isinstance(result, dict):
+            # Some prompts come back already parsed as an object; callers expect text.
+            result = json.dumps(result)
+
         return result
 
 def _clean_json(raw: str) -> str:
